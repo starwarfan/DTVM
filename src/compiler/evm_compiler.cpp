@@ -76,20 +76,25 @@ void EagerEVMJITCompiler::compile() {
   auto &CodeMPool = EVMMod->getJITCodeMemPool();
   uint8_t *JITCode = const_cast<uint8_t *>(CodeMPool.getMemStart());
 
-  // EVM has only 1 function, use direct single-threaded compilation
-  compileEVMToMC(Ctx, Mod, 0, Config.DisableMultipassGreedyRA);
-  emitObjectBuffer(&Ctx);
-  ZEN_ASSERT(Ctx.ExternRelocs.empty());
+  try {
+    // EVM has only 1 function, use direct single-threaded compilation
+    compileEVMToMC(Ctx, Mod, 0, Config.DisableMultipassGreedyRA);
+    emitObjectBuffer(&Ctx);
+    ZEN_ASSERT(Ctx.ExternRelocs.empty());
 
-  uint8_t *JITFuncPtr = Ctx.CodePtr + Ctx.FuncOffsetMap[0];
-  EVMMod->setJITCodeAndSize(JITFuncPtr, Ctx.CodeSize);
-  JIT_DUMP_WRITE_FUNC(0, JITFuncPtr, Ctx.FuncSizeMap[0]);
-  // EVM single function - no function pointer tracking needed
+    uint8_t *JITFuncPtr = Ctx.CodePtr + Ctx.FuncOffsetMap[0];
+    EVMMod->setJITCodeAndSize(JITFuncPtr, Ctx.CodeSize);
+    JIT_DUMP_WRITE_FUNC(0, JITFuncPtr, Ctx.FuncSizeMap[0]);
+    // EVM single function - no function pointer tracking needed
 
-  size_t CodeSize = CodeMPool.getMemEnd() - JITCode;
-  platform::mprotect(JITCode, TO_MPROTECT_CODE_SIZE(CodeSize),
-                     PROT_READ | PROT_EXEC);
-  EVMMod->setJITCodeAndSize(JITCode, CodeSize);
+    size_t CodeSize = CodeMPool.getMemEnd() - JITCode;
+    platform::mprotect(JITCode, TO_MPROTECT_CODE_SIZE(CodeSize),
+                      PROT_READ | PROT_EXEC);
+    EVMMod->setJITCodeAndSize(JITCode, CodeSize);
+  } catch (const common::Error &E) {
+    ZEN_ASSERT(E.getCode() == common::ErrorCode::EVMStackOverflow);
+    EVMMod->setJITFailed(true);
+  }
 
   Stats.stopRecord(Timer);
 }

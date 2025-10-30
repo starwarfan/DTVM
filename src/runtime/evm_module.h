@@ -42,6 +42,8 @@ public:
     JITCode = Code;
     JITCodeSize = Size;
   }
+  bool isJITFailed() const { return JITFailed; }
+  void setJITFailed(bool Failed) { JITFailed = Failed; }
 #endif // ZEN_ENABLE_JIT
 
 private:
@@ -56,6 +58,7 @@ private:
   common::CodeMemPool JITCodeMemPool;
   void *JITCode = nullptr;
   size_t JITCodeSize = 0;
+  bool JITFailed = false;
 #endif // ZEN_ENABLE_JIT
 };
 

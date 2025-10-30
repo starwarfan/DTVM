@@ -795,6 +795,10 @@ void Runtime::callWasmFunctionInJITMode(Instance &Inst, uint32_t FuncIdx,
 void Runtime::callEVMInJITMode(EVMInstance &Inst, evmc_message &Msg,
                                evmc::Result &Result) {
   EVMModule *Module = const_cast<EVMModule *>(Inst.getModule());
+  if (Module->isJITFailed()) {
+    Result.status_code = EVMC_STACK_OVERFLOW;
+    return;
+  }
   auto FuncPtr = GenericFunctionPointer(Module->getJITCode());
 
 #ifdef ZEN_ENABLE_CPU_EXCEPTION

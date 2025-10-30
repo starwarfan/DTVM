@@ -588,6 +588,10 @@ private:
       switch (E.getCode()) {
       case common::ErrorCode::EVMStackOverflow:
         ExitCode = 6; // EVMC_STACK_OVERFLOW;
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+        // Re-throw the error
+        throw;
+#endif
         break;
       case common::ErrorCode::EVMStackUnderflow:
         ExitCode = 7; // EVMC_STACK_UNDERFLOW;
