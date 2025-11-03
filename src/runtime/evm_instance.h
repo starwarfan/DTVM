@@ -158,6 +158,23 @@ public:
     return static_cast<int32_t>(offsetof(EVMInstance, HostArgScratch));
   }
 
+  static constexpr int32_t getEVMStackOffset() {
+    static_assert(offsetof(EVMInstance, EVMStack) <=
+                      std::numeric_limits<int32_t>::max(),
+                  "EVMInstance offsets should fit in 32-bit signed range");
+    return static_cast<int32_t>(offsetof(EVMInstance, EVMStack));
+  }
+
+    static constexpr int32_t getEVMStackSizeOffset() {
+    static_assert(offsetof(EVMInstance, EVMStackSize) <=
+                      std::numeric_limits<int32_t>::max(),
+                  "EVMInstance offsets should fit in 32-bit signed range");
+    return static_cast<int32_t>(offsetof(EVMInstance, EVMStackSize));
+  }
+
+  // Capacity for EVMStack: 1024 * 256 / 8 = 32768
+  static const size_t EVMStackCapacity = 32768;
+
 private:
   EVMInstance(const EVMModule &M, Runtime &RT)
       : RuntimeObject<EVMInstance>(RT), Mod(&M) {}
@@ -231,6 +248,10 @@ private:
 
   // Instance-level cache storage (shared across all messages in execution)
   ExecutionCache InstanceExecutionCache;
+
+ // Runtime stack data for EVM.
+  uint8_t EVMStack[EVMStackCapacity];
+  uint64_t EVMStackSize = 0;
 
   static constexpr size_t ALIGNMENT = 8;
   alignas(16) std::array<uint8_t, HostArgScratchSize> HostArgScratch{};

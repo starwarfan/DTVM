@@ -242,6 +242,133 @@ void EVMMirBuilder::meterGas(uint64_t GasCost) {
   setInsertBlock(PostBB);
 }
 
+void EVMMirBuilder::stackPush(Operand PushValue) {
+  // This pushes element to stack with store
+  U256Inst PushComponents = extractU256Operand(PushValue);
+  MPointerType *U64PtrType = MPointerType::create(Ctx, Ctx.I64Type);
+  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  // Calculate the the stack base address
+  MInstruction *InstancePtr =
+      createInstruction<DreadInstruction>(false, createVoidPtrType(), 0);
+  MInstruction *InstanceAddr = createInstruction<ConversionInstruction>(
+      false, OP_ptrtoint, &Ctx.I64Type, InstancePtr);
+  MInstruction *StackPtrOffset = createIntConstInstruction(
+    I64Type, zen::runtime::EVMInstance::getEVMStackOffset());
+  MInstruction *StackAddr = createInstruction<BinaryInstruction>(
+      false, OP_add, &Ctx.I64Type, InstanceAddr, StackPtrOffset);
+  MInstruction *StackPtr = createInstruction<ConversionInstruction>(
+      false, OP_inttoptr, U64PtrType, StackAddr);
+  // Get runtime stack size from instance
+  const int32_t StackSizeOffset = zen::runtime::EVMInstance::getEVMStackSizeOffset();
+  MInstruction *StackSize = getInstanceElement(I64Type, StackSizeOffset);
+
+  // TODO: handle EVMStackOverflow
+  MBasicBlock *StackOverflowBB =
+      CurFunc->getOrCreateExceptionSetBB(common::ErrorCode::EVMStackOverflow);
+
+  // NewSize = StackSize + 32
+  MInstruction *Const32 = createIntConstInstruction(I64Type, 32);
+  MInstruction *NewSize = createInstruction<BinaryInstruction>(
+      false, OP_add, I64Type, StackSize, Const32);
+
+  // Check if NewSize exceeds stack boundary
+  MInstruction *StackBoundary = createIntConstInstruction(I64Type,
+      zen::runtime::EVMInstance::EVMStackCapacity);
+  MInstruction *IsOverflow = createInstruction<CmpInstruction>(
+      false, CmpInstruction::ICMP_UGT, &Ctx.I64Type, NewSize, StackBoundary);
+
+  // TODO: handle EVMStackOverflow
+  MBasicBlock *StoreBB = createBasicBlock();
+  createInstruction<BrIfInstruction>(true, Ctx, IsOverflow, StackOverflowBB, StoreBB);
+  addUniqueSuccessor(StackOverflowBB);
+  addSuccessor(StoreBB);
+  setInsertBlock(StoreBB);
+
+  // Load stack data from StackPtr
+  const int32_t InnerOffsets[EVM_ELEMENTS_COUNT] = {0, 8, 16, 24};
+
+  // Save stack data
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    MInstruction *InnerOffset = createIntConstInstruction(I64Type, InnerOffsets[I]);
+    MInstruction *BaseAddr = createInstruction<ConversionInstruction>(
+          false, OP_ptrtoint, &Ctx.I64Type, StackPtr);
+    MInstruction *StackInnerOffset = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, StackSize, InnerOffset);
+    MInstruction *IndexedAddr = createInstruction<BinaryInstruction>(
+        false, OP_add, &Ctx.I64Type, BaseAddr, StackInnerOffset);
+    MInstruction *IndexedPtr = createInstruction<ConversionInstruction>(
+        false, OP_inttoptr, U64PtrType, IndexedAddr);
+    // Store to StackPtr + CurrentSize + I * 8
+    createInstruction<StoreInstruction>(true, &Ctx.VoidType, PushComponents[I],
+                                        IndexedPtr);
+  }
+  // Update stack size
+  setInstanceElement(I64Type, NewSize, StackSizeOffset);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::stackPop() {
+  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MPointerType *U64PtrType = MPointerType::create(Ctx, Ctx.I64Type);
+  // Calculate the the stack base address
+  MInstruction *InstancePtr =
+      createInstruction<DreadInstruction>(false, createVoidPtrType(), 0);
+  MInstruction *InstanceAddr = createInstruction<ConversionInstruction>(
+      false, OP_ptrtoint, &Ctx.I64Type, InstancePtr);
+  MInstruction *StackPtrOffset = createIntConstInstruction(
+    I64Type, zen::runtime::EVMInstance::getEVMStackOffset());
+  MInstruction *StackAddr = createInstruction<BinaryInstruction>(
+      false, OP_add, &Ctx.I64Type, InstanceAddr, StackPtrOffset);
+  MInstruction *StackPtr = createInstruction<ConversionInstruction>(
+      false, OP_inttoptr, U64PtrType, StackAddr);
+  // Get runtime stack size from instance
+  const int32_t StackSizeOffset = zen::runtime::EVMInstance::getEVMStackSizeOffset();
+  MInstruction *StackSize = getInstanceElement(I64Type, StackSizeOffset);
+
+  // TODO: handle EVMStackUnderflow
+  MBasicBlock *StackUnderflowBB =
+      CurFunc->getOrCreateExceptionSetBB(common::ErrorCode::EVMStackUnderflow);
+
+  // NewSize = StackSize - 32
+  MInstruction *Const32 = createIntConstInstruction(I64Type, 32);
+  MInstruction *NewSize = createInstruction<BinaryInstruction>(
+      false, OP_sub, I64Type, StackSize, Const32);
+
+  // If NewSize < 0, goto exception BB
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+  MInstruction *IsUnderflow = createInstruction<CmpInstruction>(
+      false, CmpInstruction::ICMP_SLT, &Ctx.I64Type, NewSize, Zero);
+
+  // TODO: handle EVMStackUnderflow
+  MBasicBlock *LoadBB = createBasicBlock();
+  createInstruction<BrIfInstruction>(true, Ctx, IsUnderflow, StackUnderflowBB, LoadBB);
+  addUniqueSuccessor(StackUnderflowBB);
+  addSuccessor(LoadBB);
+  setInsertBlock(LoadBB);
+
+  // Load stack data from StackPtr
+  const int32_t InnerOffsets[EVM_ELEMENTS_COUNT] = {0, 8, 16, 24};
+  U256Inst PopComponents = {};
+
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    MInstruction *InnerOffset = createIntConstInstruction(I64Type, InnerOffsets[I]);
+    MInstruction *BaseAddr = createInstruction<ConversionInstruction>(
+          false, OP_ptrtoint, &Ctx.I64Type, StackPtr);
+    MInstruction *StackInnerOffset = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, NewSize, InnerOffset);
+    MInstruction *IndexedAddr = createInstruction<BinaryInstruction>(
+        false, OP_add, &Ctx.I64Type, BaseAddr, StackInnerOffset);
+    MInstruction *IndexedPtr = createInstruction<ConversionInstruction>(
+        false, OP_inttoptr, U64PtrType, IndexedAddr);
+    // Load from StackPtr + NewSize + I * 8
+    PopComponents[I] = createInstruction<LoadInstruction>(false, I64Type, IndexedPtr);
+  }
+  // Update stack size
+  setInstanceElement(I64Type, NewSize, StackSizeOffset);
+
+  return Operand(PopComponents, EVMType::UINT256);
+}
+
 void EVMMirBuilder::handleStop() {
   createInstruction<BrInstruction>(true, Ctx, ReturnBB);
   addSuccessor(ReturnBB);

@@ -167,6 +167,9 @@ public:
 
   // ==================== Stack Instruction Handlers ====================
 
+  void stackPush(Operand PushValue);
+  Operand stackPop();
+
   // PUSH0: place value 0 on stack
   // PUSH1-PUSH32: Push N bytes onto stack
   Operand handlePush(const Bytes &Data);

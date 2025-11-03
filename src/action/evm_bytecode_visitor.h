@@ -35,17 +35,13 @@ private:
   static constexpr size_t EVM_MAX_STACK_SIZE = 1024;
 
   void push(const Operand &Opnd) {
-    if (Stack.getSize() >= EVM_MAX_STACK_SIZE) {
-      throw getError(common::ErrorCode::EVMStackOverflow);
-    }
-    Stack.push(Opnd);
+    // Stack.push(Opnd);
+    Builder.stackPush(Opnd);
   }
 
   Operand pop() {
-    if (Stack.empty()) {
-      throw getError(common::ErrorCode::EVMStackUnderflow);
-    }
-    Operand Opnd = Stack.pop();
+    // Operand Opnd = Stack.pop();
+    Operand Opnd = Builder.stackPop();
     Builder.releaseOperand(Opnd);
     return Opnd;
   }
@@ -81,6 +77,7 @@ private:
         case OP_STOP:
           handleStop();
           return true;
+          break;
         case OP_ADD:
           handleBinaryArithmetic<BinaryOperator::BO_ADD>();
           break;
@@ -620,6 +617,10 @@ private:
     return true;
   }
 
+  void handleEndBlock() {
+    //
+  }
+
   void handleStop() { Builder.handleStop(); }
 
   template <BinaryOperator Opr> void handleBinaryArithmetic() {
@@ -754,11 +755,7 @@ private:
 
   // POP: Remove top stack item
   Operand handlePop() {
-    if (Stack.empty()) {
-      throw getError(common::ErrorCode::EVMStackUnderflow);
-    }
-    Operand Result = Stack.getTop();
-    pop();
+    Operand Result = pop();
     return Result;
   }
 
