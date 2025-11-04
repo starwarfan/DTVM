@@ -165,7 +165,7 @@ public:
     return static_cast<int32_t>(offsetof(EVMInstance, EVMStack));
   }
 
-    static constexpr int32_t getEVMStackSizeOffset() {
+  static constexpr int32_t getEVMStackSizeOffset() {
     static_assert(offsetof(EVMInstance, EVMStackSize) <=
                       std::numeric_limits<int32_t>::max(),
                   "EVMInstance offsets should fit in 32-bit signed range");
@@ -249,7 +249,7 @@ private:
   // Instance-level cache storage (shared across all messages in execution)
   ExecutionCache InstanceExecutionCache;
 
- // Runtime stack data for EVM.
+  // Runtime stack data for EVM.
   uint8_t EVMStack[EVMStackCapacity];
   uint64_t EVMStackSize = 0;
 

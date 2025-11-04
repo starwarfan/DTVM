@@ -76,7 +76,6 @@ private:
         switch (Opcode) {
         case OP_STOP:
           handleStop();
-          return true;
           break;
         case OP_ADD:
           handleBinaryArithmetic<BinaryOperator::BO_ADD>();
