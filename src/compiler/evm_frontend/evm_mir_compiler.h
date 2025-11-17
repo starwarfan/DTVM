@@ -165,6 +165,10 @@ public:
 
   void releaseOperand(Operand Opnd) {}
 
+  // Block for stack check instructions
+  void createStackCheckBlock();
+  void updateStackCheckBlock(int32_t MinSize, int32_t MaxSize);
+
   // ==================== Stack Instruction Handlers ====================
 
   void stackPush(Operand PushValue);
@@ -567,6 +571,9 @@ private:
   // Jump table for dynamic jumps
   std::map<uint64_t, MBasicBlock *> JumpDestTable;
   MBasicBlock *DefaultJumpBB = nullptr; // For invalid jump destinations
+
+  // Stack check block for stack overflow/underflow checking
+  MBasicBlock* StackCheckBB = nullptr;
 
   // ==================== Interface Helper Methods ====================
 

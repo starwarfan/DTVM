@@ -242,6 +242,14 @@ void EVMMirBuilder::meterGas(uint64_t GasCost) {
   setInsertBlock(PostBB);
 }
 
+void EVMMirBuilder::createStackCheckBlock() {
+  // Create a new basic block for stack checking
+}
+
+void EVMMirBuilder::updateStackCheckBlock(int32_t MinSize, int32_t MaxSize) {
+  // Add checks in stack check BB
+}
+
 void EVMMirBuilder::stackPush(Operand PushValue) {
   // This pushes element to stack with store
   U256Inst PushComponents = extractU256Operand(PushValue);

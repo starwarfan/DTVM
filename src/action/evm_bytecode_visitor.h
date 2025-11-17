@@ -35,13 +35,28 @@ private:
   static constexpr size_t EVM_MAX_STACK_SIZE = 1024;
 
   void push(const Operand &Opnd) {
-    // Stack.push(Opnd);
-    Builder.stackPush(Opnd);
+    CurStackOffset++;
+    if (CurStackOffset > MaxStackOffset) {
+      MaxStackOffset = CurStackOffset;
+      if (MaxStackOffset > EVM_MAX_STACK_SIZE) {
+        // Detect stack overflow within a block
+        throw getError(common::ErrorCode::EVMStackOverflow);
+      }
+    }
+    Stack.push(Opnd);
   }
 
   Operand pop() {
-    // Operand Opnd = Stack.pop();
-    Operand Opnd = Builder.stackPop();
+    CurStackOffset--;
+    if (CurStackOffset < MinStackOffset) {
+      MinStackOffset = CurStackOffset;
+    }
+    Operand Opnd;
+    if (Stack.empty()) {
+      Opnd = Builder.stackPop();
+    } else {
+      Opnd = Stack.pop();
+    }
     Builder.releaseOperand(Opnd);
     return Opnd;
   }
@@ -75,8 +90,9 @@ private:
 
         switch (Opcode) {
         case OP_STOP:
+          handleEndBlock();
           handleStop();
-          break;
+          return true;
         case OP_ADD:
           handleBinaryArithmetic<BinaryOperator::BO_ADD>();
           break;
@@ -534,6 +550,7 @@ private:
         // Control flow operations
         case OP_JUMP: {
           Operand Dest = pop();
+          handleEndBlock();
           Builder.handleJump(Dest);
           InDeadCode = true;
           break;
@@ -542,12 +559,14 @@ private:
         case OP_JUMPI: {
           Operand Dest = pop();
           Operand Cond = pop();
+          handleEndBlock();
           Builder.handleJumpI(Dest, Cond);
           break;
         }
 
         case OP_JUMPDEST: {
           InDeadCode = false;
+          handleEndBlock();
           Builder.handleJumpDest(PC);
           break;
         }
@@ -569,6 +588,7 @@ private:
         case OP_RETURN: {
           Operand MemOffset = pop();
           Operand Length = pop();
+          handleEndBlock();
           Builder.handleReturn(MemOffset, Length);
           break;
         }
@@ -576,11 +596,13 @@ private:
         case OP_REVERT: {
           Operand OffsetOp = pop();
           Operand SizeOp = pop();
+          handleEndBlock();
           Builder.handleRevert(OffsetOp, SizeOp);
           break;
         }
 
         case OP_INVALID: {
+          handleEndBlock();
           Builder.handleInvalid();
           break;
         }
@@ -616,8 +638,19 @@ private:
     return true;
   }
 
-  void handleEndBlock() {
+  void handleBeginBlock() {
     //
+  }
+
+  void handleEndBlock() {
+    // Save unused stack elements to runtime
+    while (!Stack.empty()) {
+      Operand Opnd = Stack.pop();
+      Builder.stackPush(Opnd);
+    }
+    CurStackOffset = 0;
+    MinStackOffset = 0;
+    MaxStackOffset = 0;
   }
 
   void handleStop() { Builder.handleStop(); }
@@ -842,6 +875,10 @@ private:
   CompilerContext *Ctx;
   EvalStack Stack;
   bool InDeadCode = false;
+  // Min and max stack offset within a block
+  int32_t MinStackOffset = 0;
+  int32_t MaxStackOffset = 0;
+  int32_t CurStackOffset = 0;
   uint64_t PC = 0;
 };
 
