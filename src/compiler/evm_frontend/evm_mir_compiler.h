@@ -419,6 +419,8 @@ private:
   StoreInstruction *setInstanceElement(MType *ValueType, MInstruction *Value,
                                        int32_t Offset);
 
+  MInstruction *getInstanceStackTopInt(MInstruction *StackSize);
+
   // Create a full U256 operand from intx::uint256 value
   Operand createU256ConstOperand(const intx::uint256 &V);
 
@@ -573,7 +575,7 @@ private:
   MBasicBlock *DefaultJumpBB = nullptr; // For invalid jump destinations
 
   // Stack check block for stack overflow/underflow checking
-  MBasicBlock* StackCheckBB = nullptr;
+  MBasicBlock *StackCheckBB = nullptr;
 
   // ==================== Interface Helper Methods ====================
 
