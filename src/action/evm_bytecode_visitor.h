@@ -57,6 +57,7 @@ private:
       size_t BytecodeSize = Ctx->getBytecodeSize();
       const uint8_t *Ip = Bytecode;
       const uint8_t *IpEnd = Bytecode + BytecodeSize;
+      bool HasStop = false;
 
       while (Ip < IpEnd) {
         evmc_opcode Opcode = static_cast<evmc_opcode>(*Ip);
@@ -81,6 +82,7 @@ private:
         case OP_STOP:
           handleStop();
           InDeadCode = true;
+          HasStop = true;
           break;
         case OP_ADD:
           handleBinaryArithmetic<BinaryOperator::BO_ADD>();
@@ -598,6 +600,9 @@ private:
                                          std::to_string(Opcode));
         }
         PC++; // offset 1 byte for opcode
+      }
+      if (!HasStop) {
+        handleStop();
       }
     } catch (const common::Error &E) {
       int32_t ExitCode;
