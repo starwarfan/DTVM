@@ -6,33 +6,29 @@
 
 #include "common/defines.h"
 #include <cstdint>
-#include <stack>
+#include <vector>
 
 namespace zen::action {
 
 template <typename Operand> class VMEvalStack {
 public:
-  void push(const Operand &Op) { StackImpl.push(Op); }
+  void push(const Operand &Op) { StackImpl.push_back(Op); }
 
   Operand pop() {
     ZEN_ASSERT(!StackImpl.empty());
-    Operand Top = StackImpl.top();
-    StackImpl.pop();
+    Operand Top = StackImpl.back();
+    StackImpl.pop_back();
     return Top;
   }
 
-  Operand peek(uint8_t Index) {
+  Operand &peek(uint8_t Index) {
     ZEN_ASSERT(Index < StackImpl.size());
-    std::stack<Operand> TempStack = StackImpl;
-    for (uint8_t I = 0; I < Index; ++I) {
-      TempStack.pop();
-    }
-    return TempStack.top();
+    return StackImpl[StackImpl.size() - Index - 1];
   }
 
   Operand getTop() const {
     ZEN_ASSERT(!StackImpl.empty());
-    return StackImpl.top();
+    return StackImpl.back();
   }
 
   uint32_t getSize() const { return StackImpl.size(); }
@@ -40,8 +36,7 @@ public:
   bool empty() const { return StackImpl.empty(); }
 
 private:
-  // TODO: [Performance] Replace stack with vector in EVM
-  std::stack<Operand> StackImpl;
+  std::vector<Operand> StackImpl;
 };
 
 } // namespace zen::action

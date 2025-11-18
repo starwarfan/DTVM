@@ -748,6 +748,9 @@ private:
 
   // DUP1-DUP16: Duplicate Nth stack item
   void handleDup(uint8_t Index) {
+    if (Stack.getSize() < static_cast<uint32_t>(Index)) {
+      throw getError(common::ErrorCode::EVMStackUnderflow);
+    }
     Operand Result = Stack.peek(Index - 1);
     push(Result);
   }
@@ -767,16 +770,7 @@ private:
     if (Stack.getSize() < static_cast<uint32_t>(Index) + 1u) {
       throw getError(common::ErrorCode::EVMStackUnderflow);
     }
-
-    std::vector<Operand> Temp;
-    for (uint8_t I = 0; I <= Index; ++I) {
-      Temp.push_back(pop());
-    }
-    std::swap(Temp[0], Temp[Index]);
-
-    for (int I = Index; I >= 0; --I) {
-      push(Temp[I]);
-    }
+    std::swap(Stack.peek(0), Stack.peek(Index));
   }
 
   // ==================== Environment Instruction Handlers ====================
