@@ -174,6 +174,9 @@ public:
   void stackPush(Operand PushValue);
   Operand stackPop();
 
+  void stackSet(int32_t IndexFromTop, Operand SetValue);
+  Operand stackGet(int32_t IndexFromTop);
+
   // PUSH0: place value 0 on stack
   // PUSH1-PUSH32: Push N bytes onto stack
   Operand handlePush(const Bytes &Data);
@@ -420,6 +423,7 @@ private:
                                        int32_t Offset);
 
   MInstruction *getInstanceStackTopInt(MInstruction *StackSize);
+  MInstruction *getInstanceStackPeekInt(int32_t IndexFromTop);
 
   // Create a full U256 operand from intx::uint256 value
   Operand createU256ConstOperand(const intx::uint256 &V);

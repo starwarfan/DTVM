@@ -289,6 +289,36 @@ MInstruction *EVMMirBuilder::getInstanceStackTopInt(MInstruction *StackSize) {
   return StackTopAddr;
 }
 
+MInstruction *EVMMirBuilder::getInstanceStackPeekInt(int32_t IndexFromTop) {
+  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+
+  // Get runtime stack size from instance
+  const int32_t StackSizeOffset =
+      zen::runtime::EVMInstance::getEVMStackSizeOffset();
+  MInstruction *StackSize = getInstanceElement(I64Type, StackSizeOffset);
+  MInstruction *StackTopInt = getInstanceStackTopInt(StackSize);
+
+  int32_t ConstOffset = (IndexFromTop + 1) * 32;
+  MInstruction *TopOffset = createIntConstInstruction(I64Type, ConstOffset);
+
+  // Check if IndexFromTop exceeds stack size
+  MInstruction *IsUnderflow = createInstruction<CmpInstruction>(
+      false, CmpInstruction::ICMP_UGT, &Ctx.I64Type, TopOffset, StackSize);
+  // Handle EVMStackOverflow in exception BB
+  MBasicBlock *StackUnderflowBB =
+      CurFunc->getOrCreateExceptionSetBB(common::ErrorCode::EVMStackUnderflow);
+  MBasicBlock *FollowBB = createBasicBlock();
+  createInstruction<BrIfInstruction>(true, Ctx, IsUnderflow, StackUnderflowBB,
+                                     FollowBB);
+  addUniqueSuccessor(StackUnderflowBB);
+  addSuccessor(FollowBB);
+  setInsertBlock(FollowBB);
+
+  MInstruction *PeekBase = createInstruction<BinaryInstruction>(
+      false, OP_sub, &Ctx.I64Type, StackTopInt, TopOffset);
+  return PeekBase;
+}
+
 void EVMMirBuilder::stackPush(Operand PushValue) {
   // This pushes element to stack with store
   U256Inst PushComponents = extractU256Operand(PushValue);
@@ -394,6 +424,55 @@ typename EVMMirBuilder::Operand EVMMirBuilder::stackPop() {
   setInstanceElement(I64Type, NewSize, StackSizeOffset);
 
   return Operand(PopComponents, EVMType::UINT256);
+}
+
+void EVMMirBuilder::stackSet(int32_t IndexFromTop, Operand SetValue) {
+  // This set element to stack with index from top
+  U256Inst SetComponents = extractU256Operand(SetValue);
+  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MPointerType *U64PtrType = MPointerType::create(Ctx, Ctx.I64Type);
+
+  MInstruction *PeekBase = getInstanceStackPeekInt(IndexFromTop);
+
+  // Stack offset from peek base
+  const int32_t InnerOffsets[EVM_ELEMENTS_COUNT] = {0, 8, 16, 24};
+  // Save stack data
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    MInstruction *InnerOffset =
+        createIntConstInstruction(I64Type, InnerOffsets[I]);
+    MInstruction *IndexedAddr = createInstruction<BinaryInstruction>(
+        false, OP_add, &Ctx.I64Type, PeekBase, InnerOffset);
+    MInstruction *IndexedPtr = createInstruction<ConversionInstruction>(
+        false, OP_inttoptr, U64PtrType, IndexedAddr);
+    // Store to StackPtr + CurrentSize + I * 8
+    createInstruction<StoreInstruction>(true, &Ctx.VoidType, SetComponents[I],
+                                        IndexedPtr);
+  }
+}
+
+typename EVMMirBuilder::Operand EVMMirBuilder::stackGet(int32_t IndexFromTop) {
+  // This set element to stack with index from top
+  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MPointerType *U64PtrType = MPointerType::create(Ctx, Ctx.I64Type);
+
+  MInstruction *PeekBase = getInstanceStackPeekInt(IndexFromTop);
+
+  // Stack offset from peek base
+  const int32_t InnerOffsets[EVM_ELEMENTS_COUNT] = {0, 8, 16, 24};
+  U256Inst GetComponents = {};
+  // Load stack data
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    MInstruction *InnerOffset =
+        createIntConstInstruction(I64Type, InnerOffsets[I]);
+    MInstruction *IndexedAddr = createInstruction<BinaryInstruction>(
+        false, OP_add, &Ctx.I64Type, PeekBase, InnerOffset);
+    MInstruction *IndexedPtr = createInstruction<ConversionInstruction>(
+        false, OP_inttoptr, U64PtrType, IndexedAddr);
+    // Load from StackPtr + NewSize + I * 8
+    GetComponents[I] =
+        createInstruction<LoadInstruction>(false, I64Type, IndexedPtr);
+  }
+  return Operand(GetComponents, EVMType::UINT256);
 }
 
 void EVMMirBuilder::handleStop() {

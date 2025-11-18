@@ -644,8 +644,13 @@ private:
 
   void handleEndBlock() {
     // Save unused stack elements to runtime
+    EvalStack ReverseStack;
     while (!Stack.empty()) {
       Operand Opnd = Stack.pop();
+      ReverseStack.push(Opnd);
+    }
+    while (!ReverseStack.empty()) {
+      Operand Opnd = ReverseStack.pop();
       Builder.stackPush(Opnd);
     }
     CurStackOffset = 0;
@@ -781,10 +786,13 @@ private:
 
   // DUP1-DUP16: Duplicate Nth stack item
   void handleDup(uint8_t Index) {
+    Operand Result;
     if (Stack.getSize() < static_cast<uint32_t>(Index)) {
-      throw getError(common::ErrorCode::EVMStackUnderflow);
+      int32_t MemIndex = static_cast<int32_t>(Index) - Stack.getSize() - 1;
+      Result = Builder.stackGet(MemIndex);
+    } else {
+      Result = Stack.peek(Index - 1);
     }
-    Operand Result = Stack.peek(Index - 1);
     push(Result);
   }
 
@@ -796,10 +804,20 @@ private:
 
   // SWAP1-SWAP16: Swap top with Nth+1 stack item
   void handleSwap(uint8_t Index) {
-    if (Stack.getSize() < static_cast<uint32_t>(Index) + 1u) {
-      throw getError(common::ErrorCode::EVMStackUnderflow);
+    int32_t MemIndex = static_cast<int32_t>(Index) - Stack.getSize();
+    if (Stack.empty()) {
+      Operand A = Builder.stackGet(0);
+      Operand B = Builder.stackGet(MemIndex);
+      Builder.stackSet(0, B);
+      Builder.stackSet(MemIndex, A);
+    } else if (Stack.getSize() < static_cast<uint32_t>(Index) + 1u) {
+      Operand &A = Stack.peek(0);
+      Operand B = Builder.stackGet(MemIndex);
+      Builder.stackSet(MemIndex, A);
+      A = B;
+    } else {
+      std::swap(Stack.peek(0), Stack.peek(Index));
     }
-    std::swap(Stack.peek(0), Stack.peek(Index));
   }
 
   // ==================== Environment Instruction Handlers ====================
