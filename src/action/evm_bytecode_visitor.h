@@ -80,7 +80,8 @@ private:
         switch (Opcode) {
         case OP_STOP:
           handleStop();
-          return true;
+          InDeadCode = true;
+          break;
         case OP_ADD:
           handleBinaryArithmetic<BinaryOperator::BO_ADD>();
           break;
@@ -574,6 +575,7 @@ private:
           Operand MemOffset = pop();
           Operand Length = pop();
           Builder.handleReturn(MemOffset, Length);
+          InDeadCode = true;
           break;
         }
 
@@ -581,11 +583,13 @@ private:
           Operand OffsetOp = pop();
           Operand SizeOp = pop();
           Builder.handleRevert(OffsetOp, SizeOp);
+          InDeadCode = true;
           break;
         }
 
         case OP_INVALID: {
           Builder.handleInvalid();
+          InDeadCode = true;
           break;
         }
 
