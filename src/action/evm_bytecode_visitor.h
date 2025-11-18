@@ -57,7 +57,7 @@ private:
       size_t BytecodeSize = Ctx->getBytecodeSize();
       const uint8_t *Ip = Bytecode;
       const uint8_t *IpEnd = Bytecode + BytecodeSize;
-      bool HasStop = false;
+      bool LastStop = false;
 
       while (Ip < IpEnd) {
         evmc_opcode Opcode = static_cast<evmc_opcode>(*Ip);
@@ -75,6 +75,7 @@ private:
           }
           continue;
         }
+        LastStop = (Opcode == OP_STOP);
 
         Builder.meterOpcode(Opcode);
 
@@ -82,7 +83,6 @@ private:
         case OP_STOP:
           handleStop();
           InDeadCode = true;
-          HasStop = true;
           break;
         case OP_ADD:
           handleBinaryArithmetic<BinaryOperator::BO_ADD>();
@@ -601,7 +601,7 @@ private:
         }
         PC++; // offset 1 byte for opcode
       }
-      if (!HasStop) {
+      if (!LastStop) {
         handleStop();
       }
     } catch (const common::Error &E) {
