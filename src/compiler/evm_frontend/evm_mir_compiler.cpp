@@ -344,7 +344,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::stackPop() {
   MInstruction *IsUnderflow = createInstruction<CmpInstruction>(
       false, CmpInstruction::ICMP_SLT, &Ctx.I64Type, NewSize, Zero);
 
-  // TODO: handle EVMStackUnderflow
+  // Handle it in exception BB
   MBasicBlock *LoadBB = createBasicBlock();
   createInstruction<BrIfInstruction>(true, Ctx, IsUnderflow, StackUnderflowBB,
                                      LoadBB);
