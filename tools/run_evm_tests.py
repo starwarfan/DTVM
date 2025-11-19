@@ -55,8 +55,6 @@ class TestRunner:
         "invalid_jump.evm.hex",        # exception handle
         "invalid_jumpi.evm.hex",       # exception handle
         "stack_overflow.evm.hex",      # stack exception handle
-        "jumpi_loop.evm.hex",
-        "jumpi_stack.evm.hex",
     }
 
     def __init__(self, args):
