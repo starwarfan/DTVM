@@ -469,8 +469,11 @@ typename EVMMirBuilder::Operand EVMMirBuilder::stackGet(int32_t IndexFromTop) {
     MInstruction *IndexedPtr = createInstruction<ConversionInstruction>(
         false, OP_inttoptr, U64PtrType, IndexedAddr);
     // Load from StackPtr + NewSize + I * 8
-    GetComponents[I] =
+    MInstruction *LoadInstr =
         createInstruction<LoadInstruction>(false, I64Type, IndexedPtr);
+    Variable *ValVar = storeInstructionInTemp(LoadInstr, I64Type);
+    // Load from StackPtr + NewSize + I * 8
+    GetComponents[I] = loadVariable(ValVar);
   }
   return Operand(GetComponents, EVMType::UINT256);
 }
