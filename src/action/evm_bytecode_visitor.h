@@ -88,6 +88,10 @@ private:
         }
         LastStop = (Opcode == OP_STOP);
 
+        if (Opcode == OP_JUMP || Opcode == OP_JUMPI || Opcode == OP_RETURN
+            || Opcode == OP_STOP || Opcode == OP_INVALID || Opcode == OP_REVERT) {
+          handleDebug(Opcode, Ip - Bytecode - 1);
+        }
         Builder.meterOpcode(Opcode);
 
         switch (Opcode) {
@@ -891,6 +895,11 @@ private:
     Operand StatusOp = (Builder.*handler)(GasOp, ToAddrOp, ArgsOffsetOp,
                                           ArgsSizeOp, RetOffsetOp, RetSizeOp);
     push(StatusOp);
+  }
+
+  void handleDebug(evmc_opcode Opcode, uint64_t Offset) {
+    // Empty implementation
+    Builder.handleDebug(Opcode, Offset);
   }
 
   IRBuilder &Builder;

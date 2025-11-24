@@ -87,6 +87,8 @@ void EagerEVMJITCompiler::compile() {
   // EVM single function - no function pointer tracking needed
 
   size_t CodeSize = CodeMPool.getMemEnd() - JITCode;
+
+  printf("#JIT CODE addrss %p, size %zu\n", JITCode, CodeSize);
   platform::mprotect(JITCode, TO_MPROTECT_CODE_SIZE(CodeSize),
                      PROT_READ | PROT_EXEC);
   EVMMod->setJITCodeAndSize(JITCode, CodeSize);

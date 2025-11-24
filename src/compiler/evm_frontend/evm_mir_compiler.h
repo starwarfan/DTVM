@@ -159,6 +159,8 @@ public:
   void meterOpcode(evmc_opcode Opcode);
   void meterGas(uint64_t GasCost);
 
+  void handleDebug(evmc_opcode Opcode, uint64_t Offset);
+
   // Complete jump implementation with jump table
   void createJumpTable();
   void implementIndirectJump(MInstruction *JumpTarget, MBasicBlock *FailureBB);

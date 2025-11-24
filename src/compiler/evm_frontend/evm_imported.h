@@ -69,6 +69,8 @@ using DelegateCallFn = uint64_t (*)(zen::runtime::EVMInstance *, uint64_t,
                                     uint64_t,
                                     uint64_t); // DELEGATECALL, STATICCALL
 
+using DebugFn = void (*)(zen::runtime::EVMInstance *, uint64_t, uint64_t);
+
 struct RuntimeFunctions {
   U256WithU256U256Fn GetMul;
   U256WithU256U256Fn GetDiv;
@@ -127,9 +129,12 @@ struct RuntimeFunctions {
   VoidFn HandleInvalid;
   VoidWithBytes32Fn HandleSelfDestruct;
   Bytes32WithUInt64UInt64Fn GetKeccak256;
+  DebugFn HandleDebug;
 };
 
 const RuntimeFunctions &getRuntimeFunctionTable();
+
+void printFunctionTable();
 
 template <typename FuncType> uint64_t getFunctionAddress(FuncType Func) {
   return reinterpret_cast<uint64_t>(Func);
@@ -251,6 +256,9 @@ void evmSetTStore(zen::runtime::EVMInstance *Instance,
                   const intx::uint256 &Index, const intx::uint256 &Value);
 void evmHandleSelfDestruct(zen::runtime::EVMInstance *Instance,
                            const uint8_t *Beneficiary);
+
+void evmHandleDebug(zen::runtime::EVMInstance *Instance, uint64_t Opcode,
+                    uint64_t Offset);
 } // namespace COMPILER
 
 #endif // EVM_FRONTEND_EVM_IMPORTED_H

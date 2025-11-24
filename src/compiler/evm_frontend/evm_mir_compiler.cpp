@@ -95,6 +95,7 @@ void EVMMirBuilder::initEVM(CompilerContext *Context) {
 }
 
 void EVMMirBuilder::finalizeEVMBase() {
+  printFunctionTable();
   const auto &ExceptionSetBBs = CurFunc->getExceptionSetBBs();
 
   VariableIdx ExceptionIDIdx =
@@ -513,6 +514,7 @@ void EVMMirBuilder::createJumpTable() {
       PC += PushSize; // Skip the immediate data
     }
   }
+  printf("@JumpTable size: %lu\n", JumpDestTable.size());
 }
 
 void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
@@ -2412,6 +2414,15 @@ void EVMMirBuilder::handleReturnDataCopy(Operand DestOffsetComponents,
 typename EVMMirBuilder::Operand EVMMirBuilder::handleReturnDataSize() {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<uint64_t>(RuntimeFunctions.GetReturnDataSize);
+}
+
+void EVMMirBuilder::handleDebug(evmc_opcode Opcode, uint64_t Offset) {
+  U256Value OpcodeValue = {Opcode, 0, 0, 0};
+  U256Value OffsetValue = {Offset, 0, 0, 0};
+
+  const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  callRuntimeFor<void, uint64_t, uint64_t>(
+      RuntimeFunctions.HandleDebug, Operand(OpcodeValue), Operand(OffsetValue));
 }
 
 } // namespace COMPILER

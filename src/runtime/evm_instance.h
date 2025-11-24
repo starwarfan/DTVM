@@ -79,6 +79,9 @@ public:
   void setError(const Error &E) { Err = E; }
   void clearError() { Err = ErrorCode::NoError; }
 
+  uint64_t getEVMStackSize() const { return EVMStackSize; }
+  uint8_t *getEVMStack() { return EVMStack; }
+
   // can only called by hostapi directly
   // setExceptionByHostapi must be inline to capture the hostapi's frame
   // pointer
