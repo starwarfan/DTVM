@@ -701,6 +701,10 @@ void EVMMirBuilder::handleJumpDest(const uint64_t &PC) {
       createInstruction<BrInstruction>(true, Ctx, DestBB);
     }
   }
+#ifdef ZEN_ENABLE_LINUX_PERF
+  DestBB->setSourceOffset(PC);
+  DestBB->setSourceName("JUMPDEST at " + std::to_string(PC));
+#endif // ZEN_ENABLE_LINUX_PERF
   setInsertBlock(DestBB);
 }
 

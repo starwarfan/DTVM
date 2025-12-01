@@ -34,6 +34,10 @@ public:
     Streamer = std::move(*StreamerOrErr);
     TM.getObjFileLowering()->Initialize(Context, TM);
     Streamer->initSections(false, *STI);
+#ifdef ZEN_ENABLE_LINUX_PERF
+    // FileNum
+    Streamer->emitDwarfFileDirective(1, ".", "evm-bytecode");
+#endif // ZEN_ENABLE_LINUX_PERF
   }
 
   void finalize() {
@@ -70,6 +74,15 @@ protected:
   }
 
   void emitBasicBlock(CgBasicBlock *MBB) {
+#ifdef ZEN_ENABLE_LINUX_PERF
+    Streamer->emitDwarfLocDirective(1, // fileNo
+                                    MBB->getSourceOffset(),
+                                    0,     // column
+                                    0,     // flags
+                                    0,     // isa (unused)
+                                    false, // discriminator
+                                    MBB->getSourceName());
+#endif
     // Refer to the following URL:
     // https://github.com/llvm/llvm-project/blob/release%2F15.x/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp#L3629-L3642
     if (!MBB->pred_empty() && (!isBlockOnlyReachableByFallthrough(MBB))) {

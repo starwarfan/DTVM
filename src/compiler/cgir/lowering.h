@@ -82,6 +82,10 @@ protected:
       return CgBB;
     }
     CgBB = MF->createCgBasicBlock();
+#ifdef ZEN_ENABLE_LINUX_PERF
+    CgBB->setSourceOffset(MIRBB->getSourceOffset());
+    CgBB->setSourceName(MIRBB->getSourceName());
+#endif // ZEN_ENABLE_EVM
     return CgBB;
   }
 
