@@ -323,6 +323,11 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
     throw getError(ErrorCode::ObjectFileResolvingFailed);
   }
   std::memcpy(Ctx->CodePtr, CodeOrErr->data(), Ctx->CodeSize);
+
+#ifdef ZEN_ENABLE_LINUX_PERF
+  dumpAsm(ObjectToLoad->getBufferStart(), ObjectToLoad->getBufferSize(),
+          Ctx->CodePtr);
+#endif
 }
 
 void WasmJITCompiler::compileWasmToMC(WasmFrontendContext &Ctx, MModule &Mod,
