@@ -44,7 +44,9 @@ void dumpAsm(const char *Buf, size_t Size, uint8_t *CodePtr) {
     llvm::errs() << "Failed to execute objdump for '" << FilePath << "'!\n";
     return;
   }
+#ifndef ZEN_ENABLE_LINUX_PERF
   fs::remove(FilePath);
+#endif
 }
 
 } // namespace COMPILER
