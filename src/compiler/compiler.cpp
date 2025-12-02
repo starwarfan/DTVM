@@ -192,6 +192,9 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
 #ifdef ZEN_ENABLE_LINUX_PERF
   auto &FuncSizeMap = Ctx->FuncSizeMap;
   FuncSizeMap.reserve(NumSymbols);
+#ifdef ZEN_ENABLE_EVM
+  Ctx->FuncNameMap.reserve(NumSymbols);
+#endif
 #endif
   for (const auto &Sym : Obj.symbols()) {
     // Get symbol flags
@@ -259,6 +262,60 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
     FuncOffsetMap[FuncIdx] = SymOffset; // TODO: offset based on section?
   }
 
+#if defined(ZEN_ENABLE_EVM) && defined(ZEN_ENABLE_LINUX_PERF)
+  uint32_t SymIdx = 1;
+  for (const auto &Sym : Obj.symbols()) {
+    auto FlagsOrErr = Sym.getFlags();
+    if (!FlagsOrErr) {
+      continue;
+    }
+
+    // Skip undefined symbols
+    if (*FlagsOrErr & llvm::object::SymbolRef::SF_Undefined) {
+      continue;
+    }
+
+    // Get the symbol type
+    auto SymTypeOrErr = Sym.getType();
+    if (!SymTypeOrErr) {
+      continue;
+    }
+
+    // Get symbol section
+    llvm::object::section_iterator SI = Obj.section_end();
+    if (auto SIOrErr = Sym.getSection())
+      SI = *SIOrErr;
+    else {
+      continue;
+    }
+    if (SI != TextSection) {
+      continue;
+    }
+
+    // Get symbol address
+    auto AddressOrErr = Sym.getAddress();
+    if (!AddressOrErr) {
+      continue;
+    }
+
+    // Get symbol offset
+    uint64_t SymOffset = *AddressOrErr - SI->getAddress();
+    if (SymOffset == 0) {
+      continue;
+    }
+
+    // Get symbol name.
+    auto NameOrErr = Sym.getName();
+    if (!NameOrErr) {
+      continue;
+    }
+
+    FuncSizeMap[SymIdx] = llvm::object::ELFSymbolRef(Sym).getSize();
+    FuncOffsetMap[SymIdx] = SymOffset;
+    Ctx->FuncNameMap[SymIdx] = Sym.getName()->str();
+    SymIdx++;
+  }
+#endif
   // Record external relocations
   if (RelSection != Obj.section_end()) {
     auto &ExternRelocs = Ctx->ExternRelocs;
