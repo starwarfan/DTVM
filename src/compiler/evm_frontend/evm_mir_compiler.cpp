@@ -9,6 +9,7 @@
 
 namespace COMPILER {
 
+constexpr uint64_t HashMultiplier = 0x9E3779B97F4A7C15ULL;
 zen::common::EVMU256Type *EVMFrontendContext::getEVMU256Type() {
   static zen::common::EVMU256Type U256Type;
   return &U256Type;
@@ -521,6 +522,17 @@ void EVMMirBuilder::createJumpTable() {
   }
 }
 
+void EVMMirBuilder::implementConstantJump(uint64_t ConstDest,
+                                          MBasicBlock *FailureBB) {
+  if (JumpDestTable.count(ConstDest)) {
+    createInstruction<BrInstruction>(true, Ctx, JumpDestTable[ConstDest]);
+    addSuccessor(JumpDestTable[ConstDest]);
+  } else {
+    createInstruction<BrInstruction>(true, Ctx, FailureBB);
+    addSuccessor(FailureBB);
+  }
+}
+
 void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
                                           MBasicBlock *FailureBB) {
   if (JumpDestTable.empty()) {
@@ -598,16 +610,16 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handlePush(const Bytes &Data) {
 // ==================== Control Flow Instruction Handlers ====================
 
 void EVMMirBuilder::handleJump(Operand Dest) {
-  U256Inst DestComponents = extractU256Operand(Dest);
-  MInstruction *JumpTarget = DestComponents[0];
-
   MBasicBlock *InvalidJumpBB =
       getOrCreateExceptionSetBB(ErrorCode::EVMBadJumpDestination);
-  implementIndirectJump(JumpTarget, InvalidJumpBB);
-
-  MBasicBlock *SkipBB = createBasicBlock();
-  SkipBB->setJumpDestBB(true);
-  setInsertBlock(SkipBB);
+  if (Dest.isConstant()) {
+    uint64_t ConstDest = Dest.getConstValue()[0];
+    implementConstantJump(ConstDest, InvalidJumpBB);
+  } else {
+    U256Inst DestComponents = extractU256Operand(Dest);
+    MInstruction *JumpTarget = DestComponents[0];
+    implementIndirectJump(JumpTarget, InvalidJumpBB);
+  }
 }
 
 void EVMMirBuilder::handleJumpI(Operand Dest, Operand Cond) {
@@ -650,7 +662,12 @@ void EVMMirBuilder::handleJumpI(Operand Dest, Operand Cond) {
     addSuccessor(JumpTableBB);
     addSuccessor(FallThroughBB);
     setInsertBlock(JumpTableBB);
-    implementIndirectJump(JumpTarget, InvalidJumpBB);
+    if (Dest.isConstant()) {
+      uint64_t ConstDest = Dest.getConstValue()[0];
+      implementConstantJump(ConstDest, InvalidJumpBB);
+    } else {
+      implementIndirectJump(JumpTarget, InvalidJumpBB);
+    }
   }
 
   setInsertBlock(FallThroughBB);
