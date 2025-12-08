@@ -289,13 +289,13 @@ public:
 
   llvm::Optional<uint64_t> getIrrLoopHeaderWeight() const { return 0; }
 
-#ifdef ZEN_ENABLE_LINUX_PERF
+#if defined(ZEN_ENABLE_EVM) && defined(ZEN_ENABLE_LINUX_PERF)
   void setSourceOffset(uint64_t Offset) { SourceOffset = Offset; }
   uint64_t getSourceOffset() const { return SourceOffset; }
 
   void setSourceName(const std::string &Name) { SourceName = Name; }
   std::string getSourceName() const { return SourceName; }
-#endif // ZEN_ENABLE_LINUX_PERF
+#endif // ZEN_ENABLE_EVM && ZEN_ENABLE_LINUX_PERF
 
 private:
   uint32_t _idx;
@@ -311,10 +311,10 @@ private:
   /// since getSymbol is a relatively heavy-weight operation, the symbol
   /// is only computed once and is cached.
   mutable MCSymbol *BlockSymbol = nullptr;
-#ifdef ZEN_ENABLE_LINUX_PERF
+#if defined(ZEN_ENABLE_EVM) && defined(ZEN_ENABLE_LINUX_PERF)
   uint64_t SourceOffset = 0;
   std::string SourceName;
-#endif // ZEN_ENABLE_LINUX_PERF
+#endif // ZEN_ENABLE_EVM && ZEN_ENABLE_LINUX_PERF
 };
 
 /// CgInstrSpan provides an interface to get an iteration range
