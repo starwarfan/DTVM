@@ -264,13 +264,13 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
     uint64_t SymOffset = *AddressOrErr - SI->getAddress();
 
 #if defined(ZEN_ENABLE_EVM) && defined(ZEN_ENABLE_LINUX_PERF)
-  if (NameOrErr->startswith("EVMBB")) {
-    FuncSizeMap[BBSymIdx] = llvm::object::ELFSymbolRef(Sym).getSize();
-    FuncOffsetMap[BBSymIdx] = SymOffset;
-    Ctx->FuncNameMap[BBSymIdx] = NameOrErr->str();
-    BBSymIdx++;
-    continue;
-  }
+    if (NameOrErr->startswith("EVMBB")) {
+      FuncSizeMap[BBSymIdx] = llvm::object::ELFSymbolRef(Sym).getSize();
+      FuncOffsetMap[BBSymIdx] = SymOffset;
+      Ctx->FuncNameMap[BBSymIdx] = NameOrErr->str();
+      BBSymIdx++;
+      continue;
+    }
 #endif
 
 #ifdef ZEN_ENABLE_LINUX_PERF
