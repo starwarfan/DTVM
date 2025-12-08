@@ -10,6 +10,19 @@
 namespace COMPILER {
 
 constexpr uint64_t HashMultiplier = 0x9E3779B97F4A7C15ULL;
+constexpr uint32_t MinHashSize = 5;
+
+uint64_t nextPowerOfTwo(uint32_t n) {
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    n++;
+    return n;
+}
+
 zen::common::EVMU256Type *EVMFrontendContext::getEVMU256Type() {
   static zen::common::EVMU256Type U256Type;
   return &U256Type;
@@ -518,6 +531,33 @@ void EVMMirBuilder::createJumpTable() {
       uint8_t PushSize = static_cast<uint8_t>(Bytecode[PC]) + 1 -
                          static_cast<uint8_t>(evmc_opcode::OP_PUSH1);
       PC += PushSize; // Skip the immediate data
+    }
+  }
+
+  if (JumpDestTable.size() > MinHashSize) {
+    uint64_t HashSize = getNextPowerOfTwo(JumpDestTable.size());
+    HashMask = HashSize - 1;
+    std::vector<std::vector<MBasicBlock *>> HashDests(HashSize);
+    for (const auto &[DestPC, DestBB] : JumpDestTable) {
+      uint64_t Index = (DestPC * HashMultiplier) & HashMask;
+      HashDests[Index].push_back(DestBB);
+    }
+    size_t Start = 0;
+    size_t End = HashDests.size();
+    while (Start < HashSize) {
+      if (!HashDests[Start].empty()) {
+        break;
+      }
+      Start++;
+    }
+    while (End > Start) {
+      if (!HashDests[End - 1].empty()) {
+        break;
+      }
+      End--;
+    }
+    for (size_t I = Start; I < End; ++I) {
+      JumpHashTable[I] = HashDests[I][0];
     }
   }
 }
