@@ -9,6 +9,20 @@
 
 namespace COMPILER {
 
+constexpr uint64_t HashMultiplier = 0x9E3779B97F4A7C15ULL;
+constexpr uint32_t MinHashSize = 5;
+
+uint64_t nextPowerOfTwo(uint32_t n) {
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    n++;
+    return n;
+}
+
 zen::common::EVMU256Type *EVMFrontendContext::getEVMU256Type() {
   static zen::common::EVMU256Type U256Type;
   return &U256Type;
@@ -549,6 +563,17 @@ void EVMMirBuilder::createJumpTable() {
       PC += PushSize; // Skip the immediate data
     }
   }
+
+  if (JumpDestTable.size() > MinHashSize) {
+    uint64_t HashSize = nextPowerOfTwo(JumpDestTable.size());
+    HashMask = HashSize - 1;
+    std::vector<std::vector<MBasicBlock *>> HashDests(HashSize);
+    for (const auto &[DestPC, DestBB] : JumpDestTable) {
+      uint64_t Index = (DestPC * HashMultiplier) & HashMask;
+      JumpHashTable[Index].push_back(DestBB);
+      JumpHashReverse[Index].push_back(DestPC);
+    }
+  }
 }
 
 void EVMMirBuilder::implementConstantJump(uint64_t ConstDest,
@@ -578,6 +603,59 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
 
   MType *UInt64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+
+  if (!JumpHashTable.empty()) {
+    // Initialize hash cases
+    uint64_t MinHash = JumpHashTable.begin()->first;
+    uint64_t MaxHash = JumpHashTable.rbegin()->first;
+    CompileVector<std::pair<ConstantInstruction *, MBasicBlock *>> HashCases(
+      MaxHash - MinHash + 1, Ctx.MemPool);
+
+    // Calculate hash of JumpTarget
+    MInstruction *MulConst = createIntConstInstruction(UInt64Type, HashMultiplier);
+    MInstruction *MulResult = createInstruction<BinaryInstruction>(
+      false, OP_mul, UInt64Type, JumpTarget, MulConst);
+    MInstruction *AndResult = createInstruction<BinaryInstruction>(
+      false, OP_and, UInt64Type, MulResult, createIntConstInstruction(UInt64Type, HashMask));
+
+    for (uint64_t HIndex = MinHash; HIndex <= MaxHash; HIndex++) {
+      HashCases[HIndex].first = createIntConstInstruction(UInt64Type, HIndex);
+      if (JumpHashTable.count(HIndex) == 0) {
+        HashCases[HIndex].second = FailureBB;
+        addUniqueSuccessor(FailureBB);
+        continue;
+      }
+      if (JumpHashTable[HIndex].size() == 1) {
+        HashCases[HIndex].second = JumpHashTable[HIndex][0];
+        addSuccessor(JumpHashTable[HIndex][0]);
+      } else {
+        // Create switch for conflict hash items.
+        MBasicBlock *OutsideBB = CurBB;
+        MBasicBlock *SubCaseBB = createBasicBlock();
+        SubCaseBB->setJumpDestBB(true);
+        // Enter subcase BB
+        setInsertBlock(SubCaseBB);
+        auto &SubPCVec = JumpHashReverse[HIndex];
+        auto &SubDestBBVec = JumpHashTable[HIndex];
+        CompileVector<std::pair<ConstantInstruction *, MBasicBlock *>> SubCases(
+            SubDestBBVec.size(), Ctx.MemPool);
+        for (size_t I = 0; I < SubDestBBVec.size(); I++) {
+          SubCases[I].first = createIntConstInstruction(UInt64Type, SubPCVec[I]);
+          SubCases[I].second = SubDestBBVec[I];
+          addSuccessor(SubDestBBVec[I]);
+        }
+        createInstruction<SwitchInstruction>(true, Ctx, JumpTarget, FailureBB, SubCases);
+        addUniqueSuccessor(FailureBB);
+        // Back to outside BB
+        setInsertBlock(OutsideBB);
+        HashCases[HIndex].second = SubCaseBB;
+        addSuccessor(SubCaseBB);
+      }
+    }
+    createInstruction<SwitchInstruction>(true, Ctx, AndResult, FailureBB, HashCases);
+    addUniqueSuccessor(FailureBB);
+    return;
+  }
 
   CompileVector<std::pair<ConstantInstruction *, MBasicBlock *>> Cases(
       JumpDestTable.size(), Ctx.MemPool);
