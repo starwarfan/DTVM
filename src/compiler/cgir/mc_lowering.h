@@ -34,8 +34,10 @@ public:
     Streamer = std::move(*StreamerOrErr);
     TM.getObjFileLowering()->Initialize(Context, TM);
     Streamer->initSections(false, *STI);
-#ifdef ZEN_ENABLE_LINUX_PERF
-    // FileNum
+#if defined(ZEN_ENABLE_LINUX_PERF) && defined(ZEN_ENABLE_EVM)
+    // Because actual dwarf source is evm bytecode, set to ./evm-bytecode
+    // as a placeholder whether or not this file exists.
+    // fileNo: 1, directive: ".", filename: "evm-bytecode"
     Streamer->emitDwarfFileDirective(1, ".", "evm-bytecode");
 #endif // ZEN_ENABLE_LINUX_PERF
   }
@@ -62,6 +64,7 @@ protected:
 #ifdef ZEN_ENABLE_LINUX_PERF
     if (TM.getMCAsmInfo()->hasDotTypeDotSizeDirective()) {
 #ifdef ZEN_ENABLE_EVM
+      // If last BB has emitSymbolAttribute in emitBasicBlock, emit its ELFSize
       if (LastBBSymbol) {
         llvm::MCSymbol *BlockEndSym = Context.createTempSymbol();
         Streamer->emitLabel(BlockEndSym);
@@ -87,6 +90,7 @@ protected:
     bool Emitted = false;
 #if defined(ZEN_ENABLE_LINUX_PERF) && defined(ZEN_ENABLE_EVM)
     if (!MBB->getSourceName().empty()) {
+      // Emit dwarf location in source file
       Streamer->emitDwarfLocDirective(1, // fileNo
                                       MBB->getSourceOffset(),
                                       0,     // column
@@ -94,10 +98,12 @@ protected:
                                       0,     // isa (unused)
                                       false, // discriminator
                                       MBB->getSourceName());
+      // Emit block symbol attribute as MCSA_ELF_TypeFunction
       Streamer->emitSymbolAttribute(MBB->getSymbol(),
                                     llvm::MCSA_ELF_TypeFunction);
       Streamer->emitLabel(MBB->getSymbol());
       Emitted = true;
+      // Treat current BB as LastBB's end and emit size of LastBB
       if (LastBBSymbol && TM.getMCAsmInfo()->hasDotTypeDotSizeDirective()) {
         const llvm::MCExpr *SizeExp = llvm::MCBinaryExpr::createSub(
             MCSymbolRefExpr::create(MBB->getSymbol(), Context),
