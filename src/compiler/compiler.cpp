@@ -350,7 +350,7 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
   }
   std::memcpy(Ctx->CodePtr, CodeOrErr->data(), Ctx->CodeSize);
 
-#ifdef ZEN_ENABLE_LINUX_PERF
+#if defined(ZEN_ENABLE_LINUX_PERF) && !defined(ZEN_ENABLE_MULTIPASS_JIT_LOGGING)
   dumpAsm(ObjectToLoad->getBufferStart(), ObjectToLoad->getBufferSize(),
           Ctx->CodePtr);
 #endif

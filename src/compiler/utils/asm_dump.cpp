@@ -32,13 +32,19 @@ void dumpAsm(const char *Buf, size_t Size, uint8_t *CodePtr) {
   }
   llvm::dbgs() << "\n########## Assembly Dump ##########\n\n";
   char Command[512];
+  int ret = 0;
   if (CodePtr) {
-    std::snprintf(Command, sizeof(Command),
-                  "/usr/bin/objdump -d --adjust-vma=%p %s", CodePtr,
-                  FilePath.c_str());
+    ret = std::snprintf(Command, sizeof(Command),
+                        "/usr/bin/objdump -d --adjust-vma=%#" PRIxPTR " %s",
+                        reinterpret_cast<uintptr_t>(CodePtr), FilePath.c_str());
   } else {
-    std::snprintf(Command, sizeof(Command), "/usr/bin/objdump -d %s",
-                  FilePath.c_str());
+    ret = std::snprintf(Command, sizeof(Command), "/usr/bin/objdump -d %s",
+                        FilePath.c_str());
+  }
+  if (ret < 0 || (size_t)ret >= sizeof(Command)) {
+    llvm::errs() << "Failed to construct objdump command for '" << FilePath
+                 << "'!\n";
+    return;
   }
   if (system(Command) < 0) {
     llvm::errs() << "Failed to execute objdump for '" << FilePath << "'!\n";
