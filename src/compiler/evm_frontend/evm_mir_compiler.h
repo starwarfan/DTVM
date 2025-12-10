@@ -584,6 +584,8 @@ private:
 
   // Stack check block for stack overflow/underflow checking
   MBasicBlock *StackCheckBB = nullptr;
+  Variable *StackTopVar = nullptr;
+  Variable *StackSizeVar = nullptr;
 
   // ==================== Interface Helper Methods ====================
 

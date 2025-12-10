@@ -810,6 +810,7 @@ void Runtime::callEVMInJITMode(EVMInstance &Inst, evmc_message &Msg,
                                evmc::Result &Result) {
   EVMModule *Module = const_cast<EVMModule *>(Inst.getModule());
   auto FuncPtr = GenericFunctionPointer(Module->getJITCode());
+  printf("@@@ Jit code %p\n", Module->getJITCode());
 
 #ifdef ZEN_ENABLE_CPU_EXCEPTION
   jmp_buf JmpBuf;
