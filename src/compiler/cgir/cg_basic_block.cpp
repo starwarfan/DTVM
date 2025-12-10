@@ -211,8 +211,9 @@ llvm::MCSymbol *CgBasicBlock::getSymbol() const {
     BlockSymbol = Ctx.getOrCreateSymbol(
         "EVMBB" + Twine(MF->getFunction().getFuncIdx()) + "_" + BlockComment);
 #else
-    BlockSymbol =
-        Ctx.getOrCreateSymbol(Twine(Prefix) + "BB" + "_" + Twine(getNumber()));
+    BlockSymbol = Ctx.getOrCreateSymbol(Twine(Prefix) + "BB" +
+                                        Twine(MF->getFunction().getFuncIdx()) +
+                                        "_" + Twine(getNumber()));
 #endif
   }
   return BlockSymbol;

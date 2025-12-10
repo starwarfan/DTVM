@@ -289,7 +289,7 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
     ExternRelocs.reserve(NumRelocs);
     for (const auto &Reloc : RelSection->relocations()) {
       int64_t Addend = 0;
-#ifdef ZEN_ENABLE_LINUX_PERF
+#if defined(ZEN_ENABLE_EVM) && defined(ZEN_ENABLE_LINUX_PERF)
       if (Reloc.getType() != llvm::ELF::R_X86_64_PLT32) {
         continue;
       }
@@ -350,7 +350,8 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
   }
   std::memcpy(Ctx->CodePtr, CodeOrErr->data(), Ctx->CodeSize);
 
-#if defined(ZEN_ENABLE_LINUX_PERF) && !defined(ZEN_ENABLE_MULTIPASS_JIT_LOGGING)
+#if defined(ZEN_ENABLE_EVM) && defined(ZEN_ENABLE_LINUX_PERF) &&               \
+    !defined(ZEN_ENABLE_MULTIPASS_JIT_LOGGING)
   dumpAsm(ObjectToLoad->getBufferStart(), ObjectToLoad->getBufferSize(),
           Ctx->CodePtr);
 #endif
