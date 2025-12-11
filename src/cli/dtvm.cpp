@@ -57,8 +57,12 @@ int exitMain(int ExitCode, Runtime *RT = nullptr) {
 #endif // ZEN_ENABLE_EVMABI_TEST
 
 #ifdef ZEN_ENABLE_EVM
-static evmc_message createEvmMessage(uint64_t GasLimit,
-                                     const std::string &Calldata) {
+
+std::vector<uint8_t> GlobalDataBuffer;
+
+static evmc_message
+createEvmMessage(uint64_t GasLimit, const std::string &Calldata,
+                 std::vector<uint8_t> &InputDataBuffer = GlobalDataBuffer) {
   evmc_message Msg{
       .kind = EVMC_CALL,
       .flags = 0u,
@@ -77,8 +81,9 @@ static evmc_message createEvmMessage(uint64_t GasLimit,
 
   auto CalldataBytes = zen::utils::fromHex(Calldata);
   if (CalldataBytes.has_value()) {
-    Msg.input_data = CalldataBytes->data();
-    Msg.input_size = CalldataBytes->size();
+    InputDataBuffer = *CalldataBytes;
+    Msg.input_data = InputDataBuffer.data();
+    Msg.input_size = InputDataBuffer.size();
   }
 
   return Msg;
