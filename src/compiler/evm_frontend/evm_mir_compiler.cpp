@@ -9,7 +9,7 @@
 
 namespace COMPILER {
 
-// Use simple hash function h(a) = (a * HashMultiplier) & (size - 1)
+// Hash table constants
 constexpr uint64_t HashMultiplier = 0x9E3779B97F4A7C15ULL;
 constexpr uint64_t MinHashSize = 5;
 constexpr uint64_t MaxHashSize = 1024;
@@ -582,12 +582,15 @@ void EVMMirBuilder::createJumpTable() {
     }
   }
 
+  // If the size of JumpDests is greater than MinHashSize, create a hash table
+  // which calculates the hash of DestPC and use it as the index to jump
   if (JumpDestTable.size() > MinHashSize) {
     uint64_t HashSize =
         std::min(nextPowerOfTwo(JumpDestTable.size()), MaxHashSize);
     HashMask = HashSize - 1;
     std::vector<std::vector<MBasicBlock *>> HashDests(HashSize);
     for (const auto &[DestPC, DestBB] : JumpDestTable) {
+      // HashIndex(a) = (a * HashMultiplier) & (size - 1)
       uint64_t Index = (DestPC * HashMultiplier) & HashMask;
       JumpHashTable[Index].push_back(DestBB);
       JumpHashReverse[Index].push_back(DestPC);
@@ -623,6 +626,8 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
   MType *UInt64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
 
+  // If hash table is used, create mir to calculate hash index of JumpTarget
+  // PC and create switch instruction with hash index
   if (!JumpHashTable.empty()) {
     // Initialize hash cases
     uint64_t MinHash = JumpHashTable.begin()->first;
@@ -642,15 +647,17 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
     for (uint64_t HIndex = MinHash; HIndex <= MaxHash; HIndex++) {
       HashCases[HIndex].first = createIntConstInstruction(UInt64Type, HIndex);
       if (JumpHashTable.count(HIndex) == 0) {
+        // FailureBB for empty hash index
         HashCases[HIndex].second = FailureBB;
         addUniqueSuccessor(FailureBB);
         continue;
       }
       if (JumpHashTable[HIndex].size() == 1) {
+        // JumpDest BB for no-conflict hash index
         HashCases[HIndex].second = JumpHashTable[HIndex][0];
         addSuccessor(JumpHashTable[HIndex][0]);
       } else {
-        // Create switch for conflict hash items.
+        // Create switch for conflict hash items
         MBasicBlock *OutsideBB = CurBB;
         MBasicBlock *SubCaseBB = createBasicBlock();
         SubCaseBB->setJumpDestBB(true);
