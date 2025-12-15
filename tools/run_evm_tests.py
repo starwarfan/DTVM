@@ -10,6 +10,7 @@ import time
 import argparse
 import subprocess
 import yaml
+from tempfile import NamedTemporaryFile
 from typing import Dict, Any, List, Tuple
 
 class Statistics:
@@ -237,18 +238,17 @@ class TestRunner:
                 print(f"FILE: {test_case.file_path}")
                 print(f"{'='*80}")
 
-                # Run the command and capture output
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=120
-                )
-
-                if result.stdout:
-                    print(result.stdout, end="")
-                if result.stderr:
-                    print(result.stderr, end="")
+                with NamedTemporaryFile(mode='w+', encoding='utf-8') as tf:
+                    # Run the command and capture output
+                    result = subprocess.run(
+                        cmd,
+                        stdout=tf,
+                        stderr=subprocess.STDOUT,
+                        timeout=120
+                    )
+                    tf.seek(0)
+                    output = tf.read()
+                    print(output)
 
                 elapsed = (time.time() - start_time) * 1000
 
@@ -269,12 +269,16 @@ class TestRunner:
                 return result.returncode == expected_returncode
             else:
                 # capture output and parse
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=120
-                )
+                with NamedTemporaryFile(mode='w+', encoding='utf-8') as tf:
+                    result = subprocess.run(
+                        cmd,
+                        stdout=tf,
+                        stderr=subprocess.DEVNULL,
+                        timeout=60
+                    )
+                    tf.seek(0)
+                    result.stdout = tf.read()
+
                 elapsed = (time.time() - start_time) * 1000
 
                 # Parse expected results
