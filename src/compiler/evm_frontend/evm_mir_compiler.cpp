@@ -648,7 +648,8 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
     // Create cases for each hash entry
     for (uint64_t HashEntry = MinHash; HashEntry <= MaxHash; HashEntry++) {
       uint64_t HIndex = HashEntry - MinHash;
-      HashCases[HIndex].first = createIntConstInstruction(UInt64Type, HashEntry);
+      HashCases[HIndex].first =
+          createIntConstInstruction(UInt64Type, HashEntry);
       if (JumpHashTable.count(HashEntry) == 0) {
         // FailureBB for empty hash index
         HashCases[HIndex].second = FailureBB;
