@@ -643,19 +643,22 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
     MInstruction *AndResult = createInstruction<BinaryInstruction>(
         false, OP_and, UInt64Type, MulResult,
         createIntConstInstruction(UInt64Type, HashMask));
+    MInstruction *HashDest = protectUnsafeValue(AndResult, UInt64Type);
 
-    for (uint64_t HIndex = MinHash; HIndex <= MaxHash; HIndex++) {
-      HashCases[HIndex].first = createIntConstInstruction(UInt64Type, HIndex);
-      if (JumpHashTable.count(HIndex) == 0) {
+    // Create cases for each hash entry
+    for (uint64_t HashEntry = MinHash; HashEntry <= MaxHash; HashEntry++) {
+      uint64_t HIndex = HashEntry - MinHash;
+      HashCases[HIndex].first = createIntConstInstruction(UInt64Type, HashEntry);
+      if (JumpHashTable.count(HashEntry) == 0) {
         // FailureBB for empty hash index
         HashCases[HIndex].second = FailureBB;
         addUniqueSuccessor(FailureBB);
         continue;
       }
-      if (JumpHashTable[HIndex].size() == 1) {
+      if (JumpHashTable[HashEntry].size() == 1) {
         // JumpDest BB for no-conflict hash index
-        HashCases[HIndex].second = JumpHashTable[HIndex][0];
-        addSuccessor(JumpHashTable[HIndex][0]);
+        HashCases[HIndex].second = JumpHashTable[HashEntry][0];
+        addSuccessor(JumpHashTable[HashEntry][0]);
       } else {
         // Create switch for conflict hash items
         MBasicBlock *OutsideBB = CurBB;
@@ -663,8 +666,8 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
         SubCaseBB->setJumpDestBB(true);
         // Enter subcase BB
         setInsertBlock(SubCaseBB);
-        auto &SubPCVec = JumpHashReverse[HIndex];
-        auto &SubDestBBVec = JumpHashTable[HIndex];
+        auto &SubPCVec = JumpHashReverse[HashEntry];
+        auto &SubDestBBVec = JumpHashTable[HashEntry];
         CompileVector<std::pair<ConstantInstruction *, MBasicBlock *>> SubCases(
             SubDestBBVec.size(), Ctx.MemPool);
         for (size_t I = 0; I < SubDestBBVec.size(); I++) {
@@ -682,7 +685,7 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
         addSuccessor(SubCaseBB);
       }
     }
-    createInstruction<SwitchInstruction>(true, Ctx, AndResult, FailureBB,
+    createInstruction<SwitchInstruction>(true, Ctx, HashDest, FailureBB,
                                          HashCases);
     addUniqueSuccessor(FailureBB);
     return;
