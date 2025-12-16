@@ -58,11 +58,9 @@ int exitMain(int ExitCode, Runtime *RT = nullptr) {
 
 #ifdef ZEN_ENABLE_EVM
 
-std::vector<uint8_t> GlobalDataBuffer;
-
-static evmc_message
-createEvmMessage(uint64_t GasLimit, const std::string &Calldata,
-                 std::vector<uint8_t> &InputDataBuffer = GlobalDataBuffer) {
+static evmc_message createEvmMessage(uint64_t GasLimit,
+                                     const std::string &Calldata,
+                                     std::vector<uint8_t> &InputDataBuffer) {
   evmc_message Msg{
       .kind = EVMC_CALL,
       .flags = 0u,
@@ -120,7 +118,8 @@ static bool runEVMBenchmark(const std::string &Filename,
     ZEN_ASSERT(TestInstRet);
     EVMInstance *TestInst = *TestInstRet;
 
-    evmc_message TestMsg = createEvmMessage(GasLimit, Calldata);
+    std::vector<uint8_t> DataBuffer;
+    evmc_message TestMsg = createEvmMessage(GasLimit, Calldata, DataBuffer);
 
     evmc::Result TestExeResult;
     RT->callEVMMain(*TestInst, TestMsg, TestExeResult);
@@ -278,7 +277,8 @@ int main(int argc, char *argv[]) {
     }
     EVMInstance *Inst = *InstRet;
 
-    evmc_message Msg = createEvmMessage(GasLimit, Calldata);
+    std::vector<uint8_t> DataBuffer;
+    evmc_message Msg = createEvmMessage(GasLimit, Calldata, DataBuffer);
     evmc::Result ExeResult;
     RT->callEVMMain(*Inst, Msg, ExeResult);
     // Use EVM status code directly as process exit code
