@@ -6,6 +6,7 @@
 #include "compiler/evm_frontend/evm_imported.h"
 #include "compiler/mir/module.h"
 #include "runtime/evm_instance.h"
+#include "utils/hash_utils.h"
 
 namespace COMPILER {
 
@@ -13,17 +14,6 @@ namespace COMPILER {
 constexpr uint64_t HashMultiplier = 0x9E3779B97F4A7C15ULL;
 constexpr uint64_t MinHashSize = 5;
 constexpr uint64_t MaxHashSize = 1024;
-
-uint64_t nextPowerOfTwo(uint32_t n) {
-  n--;
-  n |= n >> 1;
-  n |= n >> 2;
-  n |= n >> 4;
-  n |= n >> 8;
-  n |= n >> 16;
-  n++;
-  return n;
-}
 
 zen::common::EVMU256Type *EVMFrontendContext::getEVMU256Type() {
   static zen::common::EVMU256Type U256Type;
