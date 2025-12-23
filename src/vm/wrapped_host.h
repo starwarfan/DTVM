@@ -12,9 +12,15 @@ private:
   evmc_host_context *HostContext;
 
 public:
-  WrappedHost(const evmc_host_interface *interface,
-              evmc_host_context *context) noexcept
+  WrappedHost(const evmc_host_interface *interface = nullptr,
+              evmc_host_context *context = nullptr) noexcept
       : HostInterface(interface), HostContext(context) {}
+
+  void reinitialize(const evmc_host_interface *interface,
+                    evmc_host_context *context) {
+    HostInterface = interface;
+    HostContext = context;
+  }
 
   bool account_exists(const evmc::address &Addr) const noexcept override {
     return HostInterface->account_exists(HostContext, &Addr);
