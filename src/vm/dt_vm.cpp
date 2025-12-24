@@ -1,5 +1,8 @@
+// Copyright (C) 2025 the DTVM authors. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 #include "dt_vm.h"
+
 #include "common/enums.h"
 #include "common/errors.h"
 #include "runtime/config.h"
@@ -7,14 +10,11 @@
 #include "runtime/isolation.h"
 #include "runtime/runtime.h"
 #include "wrapped_host.h"
+
 #include <evmc/evmc.h>
 #include <evmc/evmc.hpp>
 #include <evmc/helpers.h>
-#include <evmc/instructions.h>
 
-#include <algorithm>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -80,9 +80,20 @@ enum evmc_set_option_result set_option(evmc_vm *VMInstance, const char *Name,
     if (std::strcmp(Value, "interpreter") == 0) {
       VM->Config.Mode = RunMode::InterpMode;
       return EVMC_SET_OPTION_SUCCESS;
-    } else if (std::strcmp(Value, "multipass") != 0) {
-      return EVMC_SET_OPTION_INVALID_VALUE;
     }
+    if (std::strcmp(Value, "multipass") == 0) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+      VM->Config.Mode = RunMode::MultipassMode;
+      return EVMC_SET_OPTION_SUCCESS;
+#else
+      return EVMC_SET_OPTION_INVALID_VALUE;
+#endif
+    }
+    return EVMC_SET_OPTION_INVALID_VALUE;
+  }
+  if (std::strcmp(Name, "enable-evm-gas") == 0) {
+    VM->Config.EnableEvmGasMetering = true;
+    return EVMC_SET_OPTION_SUCCESS;
   }
   return EVMC_SET_OPTION_INVALID_NAME;
 }
@@ -122,7 +133,7 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
-  auto TheInst = *InstRet;
+  auto *TheInst = *InstRet;
   evmc_message Message = *Msg;
   evmc::Result Result;
   VM->RT->callEVMMain(*TheInst, Message, Result);
