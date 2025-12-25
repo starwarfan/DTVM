@@ -55,6 +55,7 @@ private:
       size_t BytecodeSize = Ctx->getBytecodeSize();
       EVMAnalyzer Analyzer;
       Analyzer.analyze(Bytecode, BytecodeSize);
+      handleBeginBlock(Analyzer);
 
       const uint8_t *Ip = Bytecode;
       const uint8_t *IpEnd = Bytecode + BytecodeSize;
@@ -619,6 +620,18 @@ private:
         handleStop();
       }
     } catch (const common::Error &E) {
+      switch (E.getCode()) {
+      case common::ErrorCode::EVMStackOverflow:
+        Builder.handleTrap(common::ErrorCode::EVMStackOverflow);
+        InDeadCode = true;
+        return true;
+      case common::ErrorCode::EVMStackUnderflow:
+        Builder.handleTrap(common::ErrorCode::EVMStackUnderflow);
+        InDeadCode = true;
+        return true;
+      default:
+        break;
+      }
       return false;
     }
     return true;
@@ -626,10 +639,14 @@ private:
 
   void handleBeginBlock(EVMAnalyzer &Analyzer) {
     const auto &BlockInfos = Analyzer.getBlockInfos();
-    ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
-    const auto &BlockInfo = BlockInfos.at(PC);
-    Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
-                                  1024 - BlockInfo.MaxStackHeight);
+    if (BlockInfos.count(PC) > 0) {
+      const auto &BlockInfo = BlockInfos.at(PC);
+      if (BlockInfo.MaxStackHeight > EVM_MAX_STACK_SIZE) {
+        throw getError(common::ErrorCode::EVMStackOverflow);
+      }
+      Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
+                                    1024 - BlockInfo.MaxStackHeight);
+    }
   }
 
   void handleEndBlock() {

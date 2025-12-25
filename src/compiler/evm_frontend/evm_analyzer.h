@@ -318,6 +318,9 @@ public:
         }
       }
     }
+    if (BlockInfos.count(CurInfo.EntryPC) == 0) {
+      BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
+    }
 
     return true;
   }
