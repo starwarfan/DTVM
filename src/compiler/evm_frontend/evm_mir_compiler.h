@@ -193,6 +193,32 @@ public:
 
   template <BinaryOperator Operator>
   Operand handleBinaryArithmetic(const Operand &LHSOp, const Operand &RHSOp) {
+    if (EnableConstEval && LHSOp.isConstant() && RHSOp.isConstant()) {
+      // Evaluate constant expressions
+      U256Value LHSValue = LHSOp.getConstValue();
+      U256Value RHSValue = RHSOp.getConstValue();
+      U256Value ResultValue = {};
+      if constexpr (Operator == BinaryOperator::BO_ADD) {
+        uint64_t Carry = 0;
+        for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+          uint64_t Sum = 0;
+          unsigned C1 = __builtin_add_overflow(LHSValue[I], RHSValue[I], &Sum);
+          unsigned C2 = __builtin_add_overflow(Sum, Carry, &ResultValue[I]);
+          Carry = C1 | C2;
+        }
+      } else if constexpr (Operator == BinaryOperator::BO_SUB) {
+        uint64_t Borrow = 0;
+        for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+            uint64_t Diff = 0;
+            unsigned B1 = __builtin_sub_overflow(LHSValue[I], RHSValue[I], &Diff);
+            unsigned B2 = __builtin_sub_overflow(Diff, Borrow, &ResultValue[I]);
+            Borrow = B1 | B2;
+        }
+      } else {
+        ZEN_ASSERT_TODO();
+      }
+      return Operand(ResultValue);
+    }
     U256Inst Result = {};
     U256Inst LHS = extractU256Operand(LHSOp);
     U256Inst RHS = extractU256Operand(RHSOp);
@@ -267,6 +293,29 @@ public:
   Operand handleExp(Operand BaseOp, Operand ExponentOp);
   template <CompareOperator Operator>
   Operand handleCompareOp(Operand LHSOp, Operand RHSOp) {
+    if (EnableConstEval && LHSOp.isConstant() &&
+        (Operator == CompareOperator::CO_EQZ || RHSOp.isConstant())) {
+      U256Value ResultValue = {};
+      U256Value LHSValue = LHSOp.getConstValue();
+      if constexpr (Operator == CompareOperator::CO_EQZ) {
+        uint64_t OrResult = 0;
+        for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+          OrResult |= LHSValue[I];
+        }
+        ResultValue[0] = OrResult == 0;
+      } else if constexpr (Operator == CompareOperator::CO_EQ) {
+        U256Value RHSValue = RHSOp.getConstValue();
+        uint64_t AndResult = 1;
+        for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+          AndResult &= LHSValue[I] == RHSValue[I];
+        }
+        ResultValue[0] = AndResult;
+      } else {
+        U256Value RHSValue = RHSOp.getConstValue();
+        return handleCompareGT_LTConst(LHSValue, RHSValue, Operator);
+      }
+      return Operand(ResultValue);
+    }
     U256Inst Result = handleCompareImpl<Operator>(LHSOp, RHSOp, &Ctx.I64Type);
     return Operand(Result, EVMType::UINT256);
   }
@@ -508,6 +557,10 @@ private:
       const U256Inst &LHS, const U256Inst &RHS, MType *ResultType,
       CompareOperator Operator);
 
+  Operand handleCompareGT_LTConst( // NOLINT(readability-identifier-naming)
+      const U256Value &LHS, const U256Value &RHS,
+      CompareOperator Operator);
+
   U256Inst handleLeftShift(const U256Inst &Value, MInstruction *ShiftAmount,
                            MInstruction *IsLargeShift);
 
@@ -596,6 +649,8 @@ private:
   MBasicBlock *StackCheckBB = nullptr;
   Variable *StackTopVar = nullptr;
   Variable *StackSizeVar = nullptr;
+
+  bool EnableConstEval = true;
 
   // ==================== Interface Helper Methods ====================
 

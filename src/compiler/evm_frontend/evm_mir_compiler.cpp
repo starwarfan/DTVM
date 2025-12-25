@@ -995,6 +995,35 @@ EVMMirBuilder::handleCompareGT_LT(const U256Inst &LHS, const U256Inst &RHS,
   return Result;
 }
 
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleCompareGT_LTConst(
+    const EVMMirBuilder::U256Value &LHS,
+    const EVMMirBuilder::U256Value &RHS, CompareOperator Operator) {
+  EVMMirBuilder::U256Value Result = {};
+  for (int I = EVM_ELEMENTS_COUNT - 1; I >= 0; --I) {
+    if (LHS[I] == RHS[I]) {
+      continue;
+    }
+    if (Operator == CompareOperator::CO_LT) {
+      Result[0] = LHS[I] < RHS[I];
+    } else if (Operator == CompareOperator::CO_LT_S) {
+      int64_t SLHS = static_cast<int64_t>(LHS[I]);
+      int64_t SRHS = static_cast<int64_t>(RHS[I]);
+      Result[0] = SLHS < SRHS;
+    } else if (Operator == CompareOperator::CO_GT) {
+      Result[0] = LHS[I] > RHS[I];
+    } else if (Operator == CompareOperator::CO_GT_S) {
+      int64_t SLHS = static_cast<int64_t>(LHS[I]);
+      int64_t SRHS = static_cast<int64_t>(RHS[I]);
+      Result[0] = SLHS > SRHS;
+    } else {
+      ZEN_ASSERT_TODO();
+    }
+    break;
+  }
+  return Operand(Result);
+}
+
 typename EVMMirBuilder::Operand EVMMirBuilder::handleNot(const Operand &LHSOp) {
   U256Inst Result = {};
   U256Inst LHS = extractU256Operand(LHSOp);
