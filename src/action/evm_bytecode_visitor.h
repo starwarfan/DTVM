@@ -619,18 +619,6 @@ private:
         handleStop();
       }
     } catch (const common::Error &E) {
-      switch (E.getCode()) {
-      case common::ErrorCode::EVMStackOverflow:
-        Builder.handleTrap(common::ErrorCode::EVMStackOverflow);
-        InDeadCode = true;
-        return true;
-      case common::ErrorCode::EVMStackUnderflow:
-        Builder.handleTrap(common::ErrorCode::EVMStackUnderflow);
-        InDeadCode = true;
-        return true;
-      default:
-        break;
-      }
       return false;
     }
     return true;

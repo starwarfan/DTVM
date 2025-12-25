@@ -317,7 +317,8 @@ void EVMMirBuilder::createStackCheckBlock(int32_t MinSize, int32_t MaxSize) {
   // Get runtime stack size
   MInstruction *StackSize = loadVariable(StackSizeVar);
   if (MinSize > 0) {
-    MInstruction *MinSizeConst = createIntConstInstruction(I64Type, MinSize);
+    MInstruction *MinSizeConst =
+        createIntConstInstruction(I64Type, MinSize * 32);
     // Check if StackSize less than MinSize
     MInstruction *IsUnderflow = createInstruction<CmpInstruction>(
         false, CmpInstruction::ICMP_ULT, &Ctx.I64Type, StackSize, MinSizeConst);
@@ -332,7 +333,7 @@ void EVMMirBuilder::createStackCheckBlock(int32_t MinSize, int32_t MaxSize) {
     setInsertBlock(MaxCheckBB);
   }
 
-  MInstruction *MaxSizeConst = createIntConstInstruction(I64Type, MaxSize);
+  MInstruction *MaxSizeConst = createIntConstInstruction(I64Type, MaxSize * 32);
   // Check if StackSize greater than MaxSize
   MInstruction *IsOverflow = createInstruction<CmpInstruction>(
       false, CmpInstruction::ICMP_UGT, &Ctx.I64Type, StackSize, MaxSizeConst);
