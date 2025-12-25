@@ -306,7 +306,8 @@ public:
         // Save current block info
         BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
         // Skip dead code
-        evmc_opcode NextOp = static_cast<evmc_opcode>(*Ip);
+        evmc_opcode NextOp =
+            Ip < IpEnd ? static_cast<evmc_opcode>(*Ip) : OP_STOP;
         while (Ip < IpEnd && NextOp != OP_JUMPDEST) {
           Ip++;
           if (NextOp >= OP_PUSH0 && NextOp <= OP_PUSH32) {
