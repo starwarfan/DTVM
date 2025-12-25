@@ -639,14 +639,13 @@ private:
 
   void handleBeginBlock(EVMAnalyzer &Analyzer) {
     const auto &BlockInfos = Analyzer.getBlockInfos();
-    if (BlockInfos.count(PC) > 0) {
-      const auto &BlockInfo = BlockInfos.at(PC);
-      if (BlockInfo.MaxStackHeight > EVM_MAX_STACK_SIZE) {
-        throw getError(common::ErrorCode::EVMStackOverflow);
-      }
-      Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
-                                    1024 - BlockInfo.MaxStackHeight);
+    ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
+    const auto &BlockInfo = BlockInfos.at(PC);
+    if (BlockInfo.MaxStackHeight > EVM_MAX_STACK_SIZE) {
+      throw getError(common::ErrorCode::EVMStackOverflow);
     }
+    Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
+                                  1024 - BlockInfo.MaxStackHeight);
   }
 
   void handleEndBlock() {
