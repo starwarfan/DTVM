@@ -1620,7 +1620,7 @@ typename EVMMirBuilder::Operand
 EVMMirBuilder::handleCallDataLoad(Operand Offset) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   normalizeOperandU64(Offset);
-  return callRuntimeFor<const uint8_t *, uint64_t>(
+  return callRuntimeFor<const intx::uint256 *, uint64_t>(
       RuntimeFunctions.GetCallDataLoad, Offset);
 }
 

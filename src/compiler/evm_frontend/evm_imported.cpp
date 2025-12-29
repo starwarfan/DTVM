@@ -306,7 +306,7 @@ const uint8_t *evmGetCallValue(zen::runtime::EVMInstance *Instance) {
   return Msg->value.bytes;
 }
 
-const uint8_t *evmGetCallDataLoad(zen::runtime::EVMInstance *Instance,
+const intx::uint256 *evmGetCallDataLoad(zen::runtime::EVMInstance *Instance,
                                   uint64_t Offset) {
   const evmc_message *Msg = Instance->getCurrentMessage();
   ZEN_ASSERT(Msg && "No current message set in EVMInstance");
@@ -321,9 +321,11 @@ const uint8_t *evmGetCallDataLoad(zen::runtime::EVMInstance *Instance,
       std::memcpy(Result.bytes, Msg->input_data + Offset, CopySize);
     }
     Cache.CalldataLoads[Key] = Result;
-    return Cache.CalldataLoads[Key].bytes;
+    return storeUint256Result(
+      intx::be::load<intx::uint256>(Cache.CalldataLoads[Key].bytes));
   }
-  return It->second.bytes;
+  return storeUint256Result(
+      intx::be::load<intx::uint256>(It->second.bytes));
 }
 
 const intx::uint256 *evmGetGasPrice(zen::runtime::EVMInstance *Instance) {

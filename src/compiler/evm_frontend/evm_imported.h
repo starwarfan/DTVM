@@ -90,7 +90,7 @@ struct RuntimeFunctions {
   Bytes32Fn GetOrigin;
   Bytes32Fn GetCaller;
   Bytes32Fn GetCallValue;
-  Bytes32WithUint64Fn GetCallDataLoad;
+  U256WithUInt64Fn GetCallDataLoad;
   SizeFn GetCallDataSize;
   SizeFn GetCodeSize;
   VoidWithUInt64UInt64UInt64Fn SetCodeCopy;
@@ -178,7 +178,7 @@ const intx::uint256 *evmGetBalance(zen::runtime::EVMInstance *Instance,
 const uint8_t *evmGetOrigin(zen::runtime::EVMInstance *Instance);
 const uint8_t *evmGetCaller(zen::runtime::EVMInstance *Instance);
 const uint8_t *evmGetCallValue(zen::runtime::EVMInstance *Instance);
-const uint8_t *evmGetCallDataLoad(zen::runtime::EVMInstance *Instance,
+const intx::uint256 *evmGetCallDataLoad(zen::runtime::EVMInstance *Instance,
                                   uint64_t Offset);
 uint64_t evmGetCallDataSize(zen::runtime::EVMInstance *Instance);
 uint64_t evmGetCodeSize(zen::runtime::EVMInstance *Instance);
