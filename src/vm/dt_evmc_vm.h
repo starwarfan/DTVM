@@ -1,6 +1,6 @@
-// dt_vm.h
-#ifndef DT_VM_H
-#define DT_VM_H
+// dt_evmc_vm.h
+#ifndef DT_EVMC_VM_H
+#define DT_EVMC_VM_H
 
 #include <evmc/evmc.h>
 #include <evmc/utils.h>
@@ -18,4 +18,4 @@ EVMC_EXPORT struct evmc_vm *evmc_create_dtvmapi(void);
 }
 #endif
 
-#endif // DT_VM_H
+#endif // DT_EVMC_VM_H

@@ -1,5 +1,5 @@
 
-#include "dt_vm.h"
+#include "dt_evmc_vm.h"
 #include "common/enums.h"
 #include "common/errors.h"
 #include "runtime/config.h"

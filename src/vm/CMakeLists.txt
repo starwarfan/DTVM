@@ -1,7 +1,7 @@
 # Copyright (C) 2025-2026 the DTVM authors. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-set(VM_SRCS dt_vm.cpp)
+set(VM_SRCS dt_evmc_vm.cpp)
 
 add_library(dtvmapi SHARED ${VM_SRCS})
 
