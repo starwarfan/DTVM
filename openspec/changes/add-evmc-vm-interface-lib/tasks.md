@@ -39,6 +39,13 @@
 - [x] 6.4 Add conditional compilation support (ZEN_ENABLE_EVM)
 - [x] 6.5 Configure static linking of libstdc++ for cross-environment compatibility
 
+## 9. OpenSpec Framework Integration
+- [x] 9.1 Add OpenSpec project structure and configuration
+- [x] 9.2 Create AGENTS.md with AI assistant instructions
+- [x] 9.3 Set up spec-driven development workflow
+- [x] 9.4 Configure change proposal management system
+- [x] 9.5 Integrate OpenSpec validation and tooling
+
 ## 7. Testing and Validation
 - [ ] 7.1 Create EVMC interface unit tests
 - [ ] 7.2 Add multi-runtime mode switching tests

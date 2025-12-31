@@ -121,12 +121,13 @@ The system SHALL implement safe resource management with proper cleanup and erro
 - **AND** the system SHALL prevent double-deletion of isolation resources
 
 ### Requirement: Cross-Platform Deployment
-The system SHALL support deployment across different environments with minimal external dependencies.
+The system SHALL support deployment across different environments with minimal external dependencies through static linking configuration.
 
 #### Scenario: Static Library Dependencies
 - **WHEN** building the EVMC library for distribution
-- **THEN** the system SHALL statically link libstdc++ to avoid version conflicts
-- **AND** the system SHALL statically link libgcc to ensure runtime compatibility
+- **THEN** the system SHALL statically link libstdc++ using `-static-libstdc++` flag to avoid version conflicts
+- **AND** the system SHALL statically link libgcc using `-static-libgcc` flag to ensure runtime compatibility
+- **AND** the system SHALL configure CMake with `target_link_options(dtvmapi PRIVATE -static-libstdc++ -static-libgcc)`
 - **AND** the system SHALL minimize dynamic library dependencies
 
 #### Scenario: Environment Portability
@@ -134,6 +135,12 @@ The system SHALL support deployment across different environments with minimal e
 - **THEN** the system SHALL run without requiring specific libstdc++ versions
 - **AND** the system SHALL work across different glibc versions (within reason)
 - **AND** the system SHALL provide clear documentation of minimum system requirements
+
+#### Scenario: Build Configuration Verification
+- **WHEN** the CMakeLists.txt is processed during build
+- **THEN** the system SHALL apply static linking flags only when ZEN_ENABLE_EVM is enabled
+- **AND** the system SHALL configure proper symbol visibility with `-fvisibility=hidden`
+- **AND** the system SHALL exclude static libraries from exports using `-Wl,--exclude-libs,ALL`
 
 ### Requirement: Error Handling and Reporting
 The system SHALL provide comprehensive error handling with appropriate EVMC status codes.

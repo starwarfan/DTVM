@@ -85,9 +85,11 @@ Implementing the EVMC interface will enable DTVM to:
 - **Update Isolation**: Security updates to system libstdc++ won't automatically apply to the library
 
 **Implementation Approach**:
-- Use `-static-libstdc++` and `-static-libgcc` linker flags
-- Configure CMake to apply these flags only for the EVMC library build
+- Use `-static-libstdc++` and `-static-libgcc` linker flags in CMakeLists.txt
+- Configure CMake with `target_link_options(dtvmapi PRIVATE -static-libstdc++ -static-libgcc)`
+- Apply these flags only when ZEN_ENABLE_EVM is enabled for the EVMC library build
 - Maintain dynamic linking for development builds to facilitate debugging
+- Add symbol visibility controls with `-fvisibility=hidden` and `-Wl,--exclude-libs,ALL`
 
 ## Implementation Details
 
@@ -161,11 +163,18 @@ struct DTVM : evmc_vm {
 - ✅ Basic error handling and resource cleanup
 - ✅ Enhanced WrappedHost with reinitialization capability
 
-### Phase 2: Build Integration (In Progress)
+### Phase 2: Build Integration (Complete)
 - ✅ Update CMake configuration
 - ✅ Add compilation options and dependencies
 - ✅ Configure export symbols and conditional compilation
-- [ ] Configure static linking for cross-environment compatibility
+- ✅ Configure static linking for cross-environment compatibility
+
+### Phase 2.5: OpenSpec Integration (Complete)
+- ✅ Add OpenSpec project structure and framework
+- ✅ Create AGENTS.md with AI assistant instructions
+- ✅ Set up spec-driven development workflow
+- ✅ Configure change proposal management system
+- ✅ Integrate OpenSpec validation and tooling
 
 ### Phase 3: Testing and Validation (Pending)
 - Unit test coverage

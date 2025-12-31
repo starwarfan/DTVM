@@ -22,9 +22,9 @@ if(ZEN_ENABLE_EVM)
   )
 
   # Define EVMC_EXPORT for proper symbol visibility
-  target_compile_definitions(
-    dtvmapi PRIVATE EVMC_EXPORT=__attribute__\(\(visibility\(\"default\"\)\)\)
-  )
+
+  target_compile_options(dtvmapi PRIVATE "-fvisibility=hidden")
+  target_link_options(dtvmapi PRIVATE "-Wl,--exclude-libs,ALL")
 
   # Link with EVMC library if available
   if(TARGET evmc::evmc)

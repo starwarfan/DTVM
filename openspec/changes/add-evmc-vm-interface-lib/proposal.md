@@ -32,14 +32,24 @@ By implementing the EVMC interface, DTVM can:
 - `src/vm/dt_evmc_vm.h` - EVMC VM interface header file (renamed from dt_vm.h)
 - `src/vm/dt_evmc_vm.cpp` - EVMC VM interface implementation (renamed from dt_vm.cpp)
 - `src/vm/wrapped_host.h` - Host interface wrapper with enhanced reinitialization support
-- `src/vm/CMakeLists.txt` - Build system configuration updated for new file names
+- `src/vm/CMakeLists.txt` - Build system configuration updated for new file names and static linking
+- `openspec/AGENTS.md` - **NEW**: OpenSpec framework integration for spec-driven development
+- `openspec/` directory structure - **NEW**: Complete OpenSpec project setup
 
 ### Compatibility Impact:
 - **Backward Compatible**: Does not affect existing DTVM APIs and functionality
 - **Ecosystem Integration**: Enhanced compatibility with Ethereum toolchain
 - **Performance**: May introduce slight call overhead through EVMC interface, but provides standardization benefits
+- **Development Process**: **NEW**: Introduces spec-driven development workflow through OpenSpec
 
 ### Dependencies:
 - Depends on EVMC library (already included in project)
 - Depends on existing DTVM Runtime and EVM execution engine
 - Requires WrappedHost implementation to bridge Host interface
+- **NEW**: OpenSpec tooling for specification management and validation
+
+### OpenSpec Integration:
+- **Specification Management**: Formal specification tracking through `openspec/specs/` directory
+- **Change Proposals**: Structured change management through `openspec/changes/` directory
+- **Development Workflow**: AI-assisted spec-driven development with validation tools
+- **Documentation Standards**: Consistent requirement and scenario documentation format
