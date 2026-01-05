@@ -545,7 +545,9 @@ private:
 
         case OP_SELFDESTRUCT: {
           Operand Beneficiary = pop();
+          handleEndBlock();
           Builder.handleSelfDestruct(Beneficiary);
+          InDeadCode = true;
           break;
         }
 
@@ -616,8 +618,10 @@ private:
         }
 
         default:
-          throw getErrorWithExtraMessage(ErrorCode::UnsupportedOpcode,
-                                         std::to_string(Opcode));
+          // Treat as invalid
+          handleEndBlock();
+          Builder.handleInvalid();
+          InDeadCode = true;
         }
         PC++; // offset 1 byte for opcode
       }
