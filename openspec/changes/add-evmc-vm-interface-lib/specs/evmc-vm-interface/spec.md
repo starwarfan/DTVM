@@ -72,10 +72,22 @@ The system SHALL support dynamic configuration of execution modes through the EV
 - **AND** the system SHALL return `EVMC_SET_OPTION_SUCCESS`
 - **AND** subsequent executions SHALL use multipass JIT compilation
 
+#### Scenario: EVM Gas Metering Configuration
+- **WHEN** a client calls `set_option` with name "enable_gas_metering" and value "true"
+- **THEN** the system SHALL enable MIR-level gas metering in the runtime configuration
+- **AND** the system SHALL return `EVMC_SET_OPTION_SUCCESS`
+- **AND** subsequent EVM bytecode compilations SHALL include detailed gas metering instrumentation
+- **WHEN** a client calls `set_option` with name "enable_gas_metering" and value "false"
+- **THEN** the system SHALL disable MIR-level gas metering in the runtime configuration
+- **AND** the system SHALL return `EVMC_SET_OPTION_SUCCESS`
+- **AND** subsequent EVM bytecode compilations SHALL optimize for performance without detailed gas metering
+
 #### Scenario: Invalid Option Handling
 - **WHEN** a client calls `set_option` with an unknown option name
 - **THEN** the system SHALL return `EVMC_SET_OPTION_INVALID_NAME`
-- **WHEN** a client calls `set_option` with an invalid option value
+- **WHEN** a client calls `set_option` with an invalid option value for "mode" (not "interpreter" or "multipass")
+- **THEN** the system SHALL return `EVMC_SET_OPTION_INVALID_VALUE`
+- **WHEN** a client calls `set_option` with an invalid option value for "enable_gas_metering" (not "true" or "false")
 - **THEN** the system SHALL return `EVMC_SET_OPTION_INVALID_VALUE`
 
 ### Requirement: Host Interface Integration

@@ -49,6 +49,38 @@ Implementing the EVMC interface will enable DTVM to:
 - SHA256: More secure but computationally expensive, over-engineered for caching scenarios
 - Memory address: Unstable, cannot cache across execution sessions
 
+### EVM Gas Metering Configuration Decision: Runtime-Level Control
+
+**Decision**: Expose EVM gas metering control through EVMC set_option interface, mapping to RuntimeConfig.EnableEvmGasMetering.
+
+**Rationale**:
+- **Performance Optimization**: Gas metering generates significant MIR code that can interfere with debugging and reduce performance
+- **Development Flexibility**: Allows developers to disable gas metering during development/debugging and enable for production
+- **Standardized Interface**: Uses standard EVMC set_option mechanism for configuration
+- **Runtime Granularity**: Configuration applies to all subsequent module compilations within the VM instance
+
+**Implementation Details**:
+- Option name: "enable_gas_metering" with values "true"/"false"
+- Maps directly to `RuntimeConfig.EnableEvmGasMetering` boolean field
+- Default value: false (disabled for performance)
+- Applied during EVM module compilation, affecting MIR-level instrumentation
+
+### EVM Gas Metering Configuration Decision: Runtime-Level Control
+
+**Decision**: Expose EVM gas metering control through EVMC set_option interface, mapping to RuntimeConfig.EnableEvmGasMetering.
+
+**Rationale**:
+- **Performance Optimization**: Gas metering generates significant MIR code that can interfere with debugging and reduce performance
+- **Development Flexibility**: Allows developers to disable gas metering during development/debugging and enable for production
+- **Standardized Interface**: Uses standard EVMC set_option mechanism for configuration
+- **Runtime Granularity**: Configuration applies to all subsequent module compilations within the VM instance
+
+**Implementation Details**:
+- Option name: "enable_gas_metering" with values "true"/"false"
+- Maps directly to `RuntimeConfig.EnableEvmGasMetering` boolean field
+- Default value: false (disabled for performance)
+- Applied during EVM module compilation, affecting MIR-level instrumentation
+
 ### Host Interface Decision: WrappedHost Bridge
 
 **Decision**: Bridge EVMC Host interface and DTVM Runtime through WrappedHost class.
@@ -98,7 +130,7 @@ Implementing the EVMC interface will enable DTVM to:
 #### DTVM Class Structure
 ```cpp
 struct DTVM : evmc_vm {
-    RuntimeConfig Config;           // Runtime configuration
+    RuntimeConfig Config;           // Runtime configuration (includes EnableEvmGasMetering)
     std::unique_ptr<Runtime> RT;    // DTVM Runtime instance
     std::unique_ptr<WrappedHost> ExecHost;  // Host interface bridge
     std::unordered_map<uint32_t, EVMModule*> LoadedMods;  // Module cache
@@ -112,7 +144,7 @@ struct DTVM : evmc_vm {
 2. **destroy()**: Clean up all resources, including module unloading and Isolation destruction
 3. **execute()**: Main execution entry point, handling EVM bytecode execution flow
 4. **get_capabilities()**: Return EVMC_CAPABILITY_EVM1
-5. **set_option()**: Support "mode" option for setting execution mode
+5. **set_option()**: Support "mode" option for setting execution mode and "enable_gas_metering" option for controlling EVM gas metering
 
 #### Execution Flow
 

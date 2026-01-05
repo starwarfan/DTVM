@@ -21,7 +21,7 @@ By implementing the EVMC interface, DTVM can:
 - `evmc_create_dtvmapi()`: VM instance creation function
 - `DTVM` class: Main VM implementation inheriting from `evmc_vm`
 - Standard EVMC methods: `destroy`, `execute`, `get_capabilities`, `set_option`
-- Runtime configuration: Support for EVM format and multiple execution modes
+- Runtime configuration: Support for EVM format, multiple execution modes, and EVM gas metering control
 
 ## Impact
 

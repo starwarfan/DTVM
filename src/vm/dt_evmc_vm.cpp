@@ -82,7 +82,20 @@ enum evmc_set_option_result set_option(evmc_vm *VMInstance, const char *Name,
     if (std::strcmp(Value, "interpreter") == 0) {
       VM->Config.Mode = RunMode::InterpMode;
       return EVMC_SET_OPTION_SUCCESS;
-    } else if (std::strcmp(Value, "multipass") != 0) {
+    } else if (std::strcmp(Value, "multipass") == 0) {
+      VM->Config.Mode = RunMode::MultipassMode;
+      return EVMC_SET_OPTION_SUCCESS;
+    } else {
+      return EVMC_SET_OPTION_INVALID_VALUE;
+    }
+  } else if (std::strcmp(Name, "enable_gas_metering") == 0) {
+    if (std::strcmp(Value, "true") == 0) {
+      VM->Config.EnableEvmGasMetering = true;
+      return EVMC_SET_OPTION_SUCCESS;
+    } else if (std::strcmp(Value, "false") == 0) {
+      VM->Config.EnableEvmGasMetering = false;
+      return EVMC_SET_OPTION_SUCCESS;
+    } else {
       return EVMC_SET_OPTION_INVALID_VALUE;
     }
   }

@@ -25,6 +25,7 @@
 - [x] 4.2 Support multipass JIT execution mode configuration
 - [x] 4.3 Implement runtime configuration validation and error handling
 - [x] 4.4 Add EVM format input support
+- [x] 4.5 Add EVM gas metering enable configuration support
 
 ## 5. Memory and Resource Management
 - [x] 5.1 Implement EVM module loading and unloading management
@@ -39,22 +40,13 @@
 - [x] 6.4 Add conditional compilation support (ZEN_ENABLE_EVM)
 - [x] 6.5 Configure static linking of libstdc++ for cross-environment compatibility
 
-## 9. OpenSpec Framework Integration
-- [x] 9.1 Add OpenSpec project structure and configuration
-- [x] 9.2 Create AGENTS.md with AI assistant instructions
-- [x] 9.3 Set up spec-driven development workflow
-- [x] 9.4 Configure change proposal management system
-- [x] 9.5 Integrate OpenSpec validation and tooling
+## 7. OpenSpec Framework Integration
+- [x] 7.1 Add OpenSpec project structure and configuration
+- [x] 7.2 Create AGENTS.md with AI assistant instructions
+- [x] 7.3 Set up spec-driven development workflow
+- [x] 7.4 Configure change proposal management system
+- [x] 7.5 Integrate OpenSpec validation and tooling
 
-## 7. Testing and Validation
-- [ ] 7.1 Create EVMC interface unit tests
-- [ ] 7.2 Add multi-runtime mode switching tests
-- [ ] 7.3 Implement Host interface integration tests
-- [ ] 7.4 Add memory leak and resource management tests
-- [ ] 7.5 Validate EVMC ABI compatibility
+## Future Work
 
-## 8. Documentation and Examples
-- [ ] 8.1 Update API documentation for EVMC interface
-- [ ] 8.2 Add EVMC usage example code
-- [ ] 8.3 Update build and integration guides
-- [ ] 8.4 Add performance benchmark documentation
+Testing and documentation tasks have been moved to `openspec/TODO-SPEC.md` for future implementation as they are not part of this core implementation change.
