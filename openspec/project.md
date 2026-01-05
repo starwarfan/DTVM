@@ -13,7 +13,7 @@ Key goals:
 - **Core Language**: C++ (primary implementation)
 - **Runtime Support**: C, Rust APIs
 - **Compilation**: CMake build system
-- **JIT Backend**: LLVM 15 (for Lazy-JIT mode)
+- **JIT Backend**: Customized implementation based on some base data structures from LLVM 15
 - **Target Architectures**: x86-64, ARM64
 - **Smart Contract Languages**: Solidity, C/C++, Rust, Java, Golang, AssemblyScript
 - **Security**: Intel SGX TEE support
