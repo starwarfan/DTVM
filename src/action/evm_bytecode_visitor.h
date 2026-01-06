@@ -618,9 +618,9 @@ private:
         }
 
         default:
-          // Treat as invalid
+          // Treat as undefined
           handleEndBlock();
-          Builder.handleInvalid();
+          Builder.handleUndefined();
           InDeadCode = true;
         }
         PC++; // offset 1 byte for opcode
