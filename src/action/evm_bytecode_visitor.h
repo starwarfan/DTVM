@@ -650,7 +650,10 @@ private:
     const auto &BlockInfos = Analyzer.getBlockInfos();
     ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
     const auto &BlockInfo = BlockInfos.at(PC);
-    if (BlockInfo.MaxStackHeight > EVM_MAX_STACK_SIZE) {
+    if (static_cast<size_t>(-BlockInfo.MinStackHeight) > EVM_MAX_STACK_SIZE) {
+      throw getError(common::ErrorCode::EVMStackUnderflow);
+    }
+    if (static_cast<size_t>(BlockInfo.MaxStackHeight) > EVM_MAX_STACK_SIZE) {
       throw getError(common::ErrorCode::EVMStackOverflow);
     }
     Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
