@@ -56,6 +56,11 @@ private:
       EVMAnalyzer Analyzer;
       Analyzer.analyze(Bytecode, BytecodeSize);
 
+      // Set up split information in the builder if splitting is enabled
+      if (Analyzer.shouldSplitBlock()) {
+        Builder.setSplitInfo(&Analyzer.getSplitFunctions());
+      }
+
       const uint8_t *Ip = Bytecode;
       const bool StartsWithJumpDest =
           BytecodeSize > 0 &&
@@ -79,6 +84,17 @@ private:
                 static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
             Ip += NumBytes;
           }
+          continue;
+        }
+
+        // Check for split points and handle internal calls
+        if (Builder.isAtSplitPoint(PC)) {
+          uint32_t funcIdx = Builder.getFunctionIndexForPC(PC);
+          Builder.handleInternalCall(funcIdx);
+
+          // Skip to the end of this split function
+          uint64_t endPC = Builder.getSplitEndPC(PC);
+          Ip = Bytecode + endPC;
           continue;
         }
         bool IsJumpDest = (Opcode == OP_JUMPDEST);
