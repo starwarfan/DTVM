@@ -71,13 +71,83 @@ public:
     return SplitFunctions;
   }
 
-  // Find optimal split points for large blocks
-  std::vector<uint64_t> findOptimalSplitPoints(const uint8_t *Bytecode,
-                                               size_t BytecodeSize);
+  // Split metadata management methods
 
-  // Find the best split point within a search window around target PC
-  uint64_t findBestSplitPoint(uint64_t targetPC, const uint8_t *Bytecode,
-                              size_t BytecodeSize);
+  // Query split information by PC address
+  const SplitInfo *getSplitInfoByPC(uint64_t pc) const {
+    for (const auto &entry : SplitFunctions) {
+      const SplitInfo &info = entry.second;
+      if (pc >= info.StartPC && pc < info.EndPC) {
+        return &info;
+      }
+    }
+    return nullptr;
+  }
+
+  // Get function index for a given PC
+  uint32_t getFunctionIndexByPC(uint64_t pc) const {
+    const SplitInfo *info = getSplitInfoByPC(pc);
+    return info ? info->FunctionIndex : 0; // 0 is main function
+  }
+
+  // Check if PC is at a split boundary
+  bool isSplitBoundary(uint64_t pc) const {
+    for (const auto &entry : SplitFunctions) {
+      if (entry.second.StartPC == pc) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Get total number of split functions (including main function)
+  uint32_t getTotalFunctionCount() const {
+    return SplitFunctions.empty() ? 1 : NextFunctionIndex;
+  }
+
+  // Validate split boundary correctness
+  bool validateSplitBoundaries(size_t bytecodeSize) const {
+    if (SplitFunctions.empty()) {
+      return true; // No splits, always valid
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;
+
+    // Collect all ranges
+    for (const auto &entry : SplitFunctions) {
+      ranges.emplace_back(entry.second.StartPC, entry.second.EndPC);
+    }
+
+    // Sort ranges by start PC
+    std::sort(ranges.begin(), ranges.end());
+
+    // Check for gaps and overlaps
+    uint64_t expectedStart = 0;
+    for (const auto &range : ranges) {
+      if (range.first != expectedStart) {
+        return false; // Gap found
+      }
+      if (range.first >= range.second) {
+        return false; // Invalid range
+      }
+      expectedStart = range.second;
+    }
+
+    // Check if last range covers to the end
+    return expectedStart >= bytecodeSize;
+  }
+
+  // Get all split points in sorted order
+  std::vector<uint64_t> getAllSplitPoints() const {
+    std::vector<uint64_t> splitPoints;
+    for (const auto &entry : SplitFunctions) {
+      if (entry.second.StartPC > 0) { // Skip main function start
+        splitPoints.push_back(entry.second.StartPC);
+      }
+    }
+    std::sort(splitPoints.begin(), splitPoints.end());
+    return splitPoints;
+  }
 
   bool analyze(const uint8_t *Bytecode, size_t BytecodeSize) {
     BlockInfos.clear();
@@ -446,6 +516,15 @@ public:
       SplitFunctions.emplace(lastPC, SplitInfo(lastPC, BytecodeSize,
                                                NextFunctionIndex++, startHeight,
                                                endHeight));
+    }
+
+    // Validate split boundaries for correctness
+    if (!validateSplitBoundaries(BytecodeSize)) {
+      // If validation fails, clear split functions and return empty split
+      // points
+      SplitFunctions.clear();
+      NextFunctionIndex = 1;
+      return std::vector<uint64_t>();
     }
 
     return splitPoints;
