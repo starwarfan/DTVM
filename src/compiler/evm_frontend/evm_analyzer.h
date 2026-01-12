@@ -7,6 +7,9 @@
 #include "compiler/common/common_defs.h"
 #include "evmc/evmc.h"
 #include "evmc/instructions.h"
+#include <algorithm>
+#include <climits>
+#include <cstdlib>
 
 namespace COMPILER {
 
@@ -16,6 +19,10 @@ class EVMAnalyzer {
 
 public:
   EVMAnalyzer() {}
+
+  // Configuration constants for block splitting
+  static constexpr uint32_t DEFAULT_BLOCK_SIZE_THRESHOLD = 1000;
+  static constexpr uint32_t SPLIT_SEARCH_WINDOW = 50;
 
   struct BlockInfo {
     uint64_t EntryPC = 0;
@@ -29,12 +36,53 @@ public:
     BlockInfo(uint64_t PC) : EntryPC(PC) {}
   };
 
+  // Structure to store split function metadata
+  struct SplitInfo {
+    uint64_t StartPC = 0;
+    uint64_t EndPC = 0;
+    uint32_t FunctionIndex = 0;
+    int32_t StackHeightAtStart = 0;
+    int32_t StackHeightAtEnd = 0;
+
+    SplitInfo() = default;
+    SplitInfo(uint64_t start, uint64_t end, uint32_t funcIdx,
+              int32_t startHeight, int32_t endHeight)
+        : StartPC(start), EndPC(end), FunctionIndex(funcIdx),
+          StackHeightAtStart(startHeight), StackHeightAtEnd(endHeight) {}
+  };
+
   const std::map<uint64_t, BlockInfo> &getBlockInfos() const {
     return BlockInfos;
   }
 
+  // Get the total opcode count from the last analysis
+  uint32_t getOpcodeCount() const { return OpcodeCount; }
+
+  // Check if the analyzed block should be split based on opcode count
+  bool shouldSplitBlock() const { return shouldSplitBlock(OpcodeCount); }
+
+  // Check if a given opcode count exceeds the threshold
+  bool shouldSplitBlock(uint32_t opcodeCount) const {
+    return opcodeCount > DEFAULT_BLOCK_SIZE_THRESHOLD;
+  }
+
+  // Get split function information
+  const std::map<uint64_t, SplitInfo> &getSplitFunctions() const {
+    return SplitFunctions;
+  }
+
+  // Find optimal split points for large blocks
+  std::vector<uint64_t> findOptimalSplitPoints(const uint8_t *Bytecode,
+                                               size_t BytecodeSize);
+
+  // Find the best split point within a search window around target PC
+  uint64_t findBestSplitPoint(uint64_t targetPC, const uint8_t *Bytecode,
+                              size_t BytecodeSize);
+
   bool analyze(const uint8_t *Bytecode, size_t BytecodeSize) {
     BlockInfos.clear();
+    OpcodeCount = 0;            // Reset opcode counter
+    OpcodeStackHeights.clear(); // Reset stack height tracking
     const uint8_t *Ip = Bytecode;
     const uint8_t *IpEnd = Bytecode + BytecodeSize;
 
@@ -47,6 +95,12 @@ public:
       PC = static_cast<uint64_t>(Diff >= 0 ? Diff : 0);
 
       Ip++;
+
+      // Count this opcode (excluding PUSH instruction data bytes)
+      OpcodeCount++;
+
+      // Record stack height at this PC for split analysis
+      OpcodeStackHeights.emplace_back(PC, CurInfo.StackHeightDiff);
 
       // Calculate stack operations for each opcode
       int PopCount = 0;
@@ -336,12 +390,171 @@ public:
       BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
     }
 
+    // After analysis, if splitting is needed, find optimal split points
+    if (shouldSplitBlock()) {
+      findOptimalSplitPoints(Bytecode, BytecodeSize);
+    }
+
     return true;
+  }
+
+  // Find optimal split points for large blocks
+  std::vector<uint64_t> findOptimalSplitPoints(const uint8_t *Bytecode,
+                                               size_t BytecodeSize) {
+    std::vector<uint64_t> splitPoints;
+    SplitFunctions.clear();
+    NextFunctionIndex = 1;
+
+    if (!shouldSplitBlock()) {
+      return splitPoints;
+    }
+
+    // Calculate target split intervals
+    uint32_t numSplits = (OpcodeCount + DEFAULT_BLOCK_SIZE_THRESHOLD - 1) /
+                         DEFAULT_BLOCK_SIZE_THRESHOLD;
+    if (numSplits <= 1) {
+      return splitPoints;
+    }
+
+    // Find split points at regular intervals
+    for (uint32_t i = 1; i < numSplits; i++) {
+      uint64_t targetPC = (i * OpcodeCount) / numSplits;
+      uint64_t optimalPC = findBestSplitPoint(targetPC, Bytecode, BytecodeSize);
+      if (optimalPC != UINT64_MAX) {
+        splitPoints.push_back(optimalPC);
+      }
+    }
+
+    // Create split function metadata
+    uint64_t lastPC = 0;
+    for (size_t i = 0; i < splitPoints.size(); i++) {
+      uint64_t startPC = (i == 0) ? 0 : splitPoints[i - 1];
+      uint64_t endPC = splitPoints[i];
+      int32_t startHeight = getStackHeightAtPC(startPC);
+      int32_t endHeight = getStackHeightAtPC(endPC);
+
+      SplitFunctions.emplace(startPC,
+                             SplitInfo(startPC, endPC, NextFunctionIndex++,
+                                       startHeight, endHeight));
+      lastPC = endPC;
+    }
+
+    // Add the final function
+    if (!splitPoints.empty()) {
+      int32_t startHeight = getStackHeightAtPC(lastPC);
+      int32_t endHeight = getStackHeightAtPC(BytecodeSize);
+      SplitFunctions.emplace(lastPC, SplitInfo(lastPC, BytecodeSize,
+                                               NextFunctionIndex++, startHeight,
+                                               endHeight));
+    }
+
+    return splitPoints;
+  }
+
+  // Find the best split point within a search window around target PC
+  uint64_t findBestSplitPoint(uint64_t targetPC, const uint8_t *Bytecode,
+                              size_t BytecodeSize) {
+    uint64_t bestPC = UINT64_MAX;
+    int32_t bestStackHeightDiff = INT32_MAX;
+
+    // Define search window
+    uint64_t windowStart =
+        (targetPC > SPLIT_SEARCH_WINDOW) ? (targetPC - SPLIT_SEARCH_WINDOW) : 0;
+    uint64_t windowEnd = std::min(targetPC + SPLIT_SEARCH_WINDOW,
+                                  static_cast<uint64_t>(BytecodeSize));
+
+    // Search for the best split point within the window
+    for (uint64_t pc = windowStart; pc < windowEnd; pc++) {
+      if (isValidSplitPoint(pc, Bytecode, BytecodeSize)) {
+        int32_t stackHeight = getStackHeightAtPC(pc);
+        int32_t stackHeightDiff = std::abs(stackHeight);
+
+        if (stackHeightDiff < bestStackHeightDiff) {
+          bestStackHeightDiff = stackHeightDiff;
+          bestPC = pc;
+
+          // If we find a perfect split point (stack height 0), use it
+          if (stackHeightDiff == 0) {
+            break;
+          }
+        }
+      }
+    }
+
+    return bestPC;
   }
 
 private:
   std::map<uint64_t, BlockInfo> BlockInfos;
+  std::map<uint64_t, SplitInfo> SplitFunctions; // Split function metadata
+  std::vector<std::pair<uint64_t, int32_t>>
+      OpcodeStackHeights; // PC -> StackHeight mapping for split analysis
   uint64_t PC = 0;
+  uint32_t OpcodeCount = 0; // Total opcode count for splitting analysis
+  uint32_t NextFunctionIndex =
+      1; // Next available function index (0 is main function)
+
+  // Helper methods for split point analysis
+  bool isValidSplitPoint(uint64_t pc, const uint8_t *Bytecode,
+                         size_t BytecodeSize) const {
+    if (pc >= BytecodeSize) {
+      return false;
+    }
+
+    // Check if this PC is at the start of an instruction (not in the middle of
+    // PUSH data)
+    const uint8_t *Ip = Bytecode;
+    const uint8_t *IpEnd = Bytecode + BytecodeSize;
+    uint64_t currentPC = 0;
+
+    while (Ip < IpEnd && currentPC <= pc) {
+      if (currentPC == pc) {
+        // This PC is at the start of an instruction
+        evmc_opcode opcode = static_cast<evmc_opcode>(*Ip);
+
+        // Don't split in the middle of PUSH instructions or at invalid opcodes
+        if (opcode >= OP_PUSH0 && opcode <= OP_PUSH32) {
+          return false;
+        }
+        if (opcode == OP_INVALID) {
+          return false;
+        }
+
+        // Don't split at jump destinations (they should remain as block entry
+        // points)
+        if (opcode == OP_JUMPDEST) {
+          return false;
+        }
+
+        return true;
+      }
+
+      // Advance to next instruction
+      evmc_opcode opcode = static_cast<evmc_opcode>(*Ip);
+      Ip++;
+      currentPC++;
+
+      if (opcode >= OP_PUSH0 && opcode <= OP_PUSH32) {
+        uint8_t pushBytes = opcode - OP_PUSH0;
+        Ip += pushBytes;
+        currentPC += pushBytes;
+      }
+    }
+
+    return false;
+  }
+
+  int32_t getStackHeightAtPC(uint64_t pc) const {
+    // Find the stack height at the given PC from our recorded data
+    for (const auto &entry : OpcodeStackHeights) {
+      if (entry.first == pc) {
+        return entry.second;
+      }
+    }
+
+    // If not found, return 0 (this shouldn't happen in normal operation)
+    return 0;
+  }
 };
 
 } // namespace COMPILER
