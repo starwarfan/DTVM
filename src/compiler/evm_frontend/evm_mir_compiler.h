@@ -177,6 +177,8 @@ public:
 
   bool compile(CompilerContext *Context);
   void loadEVMInstanceAttr();
+  void loadStackVariables();
+  void saveStackVariables();
   void initEVM(CompilerContext *Context);
   void finalizeEVMBase();
 
@@ -192,6 +194,7 @@ public:
 
   // Block for stack check instructions
   void createStackCheckBlock(int32_t MinSize, int32_t MaxSize);
+  void finishBlock();
 
   // ==================== Stack Instruction Handlers ====================
 

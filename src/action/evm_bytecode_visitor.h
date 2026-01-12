@@ -639,6 +639,7 @@ private:
       return;
     }
     InDeadCode = false;
+    BlockStartPC = PC;
     Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
                                   1024 - BlockInfo.MaxStackHeight);
     int32_t TotalPopSize = -BlockInfo.MinPopHeight;
@@ -665,6 +666,7 @@ private:
       Builder.stackPush(Opnd);
     }
     InDeadCode = true;
+    Builder.finishBlock();
   }
 
   void handleStop() { Builder.handleStop(); }
@@ -936,6 +938,7 @@ private:
   EvalStack Stack;
   bool InDeadCode = false;
   uint64_t PC = 0;
+  uint64_t BlockStartPC = 0;
 };
 
 } // namespace COMPILER

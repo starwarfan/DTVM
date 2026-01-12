@@ -91,7 +91,10 @@ void EVMMirBuilder::loadEVMInstanceAttr() {
   InstanceAddr = createInstruction<ConversionInstruction>(
       false, OP_ptrtoint, &Ctx.I64Type,
       createInstruction<DreadInstruction>(false, createVoidPtrType(), 0));
+  ExceptionReturnBB = CurFunc->createExceptionReturnBB();
+}
 
+void EVMMirBuilder::loadStackVariables() {
   // Initialize stack size variable
   StackSizeVar = CurFunc->createVariable(&Ctx.I64Type);
   const int32_t StackSizeOffset =
@@ -109,8 +112,20 @@ void EVMMirBuilder::loadEVMInstanceAttr() {
       false, OP_add, &Ctx.I64Type, StackBaseAddr, StackSize);
   createInstruction<DassignInstruction>(true, &(Ctx.VoidType), StackTopAddr,
                                         StackTopVar->getVarIdx());
+}
 
-  ExceptionReturnBB = CurFunc->createExceptionReturnBB();
+void EVMMirBuilder::saveStackVariables() {
+  if (!StackSizeVar) {
+    return;
+  }
+  // Save stack size variable back to instance
+  const int32_t StackSizeOffset =
+      zen::runtime::EVMInstance::getEVMStackSizeOffset();
+  MInstruction *StackSizeValue = createInstruction<DreadInstruction>(
+      false, &Ctx.I64Type, StackSizeVar->getVarIdx());
+  setInstanceElement(&Ctx.I64Type, StackSizeValue, StackSizeOffset);
+  StackSizeVar = nullptr;
+  StackTopVar = nullptr;
 }
 
 void EVMMirBuilder::initEVM(CompilerContext *Context) {
@@ -496,6 +511,8 @@ void EVMMirBuilder::reloadGasFromMemory() {
 #endif
 
 void EVMMirBuilder::createStackCheckBlock(int32_t MinSize, int32_t MaxSize) {
+  // Load stack size/top to variables for this block
+  loadStackVariables();
   // Create a new basic block for stack checking
   MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
   // Get runtime stack size
@@ -531,6 +548,11 @@ void EVMMirBuilder::createStackCheckBlock(int32_t MinSize, int32_t MaxSize) {
   addUniqueSuccessor(StackOverflowBB);
   addSuccessor(FollowBB);
   setInsertBlock(FollowBB);
+}
+
+void EVMMirBuilder::finishBlock() {
+  // Save stack size/top to memory to break their live ranges.
+  saveStackVariables();
 }
 
 MInstruction *EVMMirBuilder::getInstanceStackTopInt() {
