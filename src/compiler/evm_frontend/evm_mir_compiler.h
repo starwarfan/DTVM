@@ -16,6 +16,7 @@
 // Forward declaration to avoid circular dependency
 namespace COMPILER {
 struct RuntimeFunctions;
+class EVMAnalyzer; // Forward declaration
 } // namespace COMPILER
 
 namespace zen::runtime {
@@ -92,6 +93,11 @@ private:
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   bool GasRegisterEnabled = false;
 #endif
+
+public:
+  // Split analysis support (for Task 2.1)
+  class EVMAnalyzer *SplitAnalyzer = nullptr;
+  bool UseSplitting = false;
 };
 
 void buildEVMFunction(EVMFrontendContext &Context, MModule &MMod,

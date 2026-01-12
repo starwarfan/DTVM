@@ -4,6 +4,7 @@
 #include "compiler/evm_compiler.h"
 #include "common/thread_pool.h"
 #include "compiler/cgir/cg_function.h"
+#include "compiler/evm_frontend/evm_analyzer.h"
 #include "compiler/mir/module.h"
 #include "compiler/target/x86/x86_mc_lowering.h"
 #include "platform/map.h"
@@ -66,7 +67,23 @@ void EagerEVMJITCompiler::compile() {
   Ctx.setGasChunkInfo(Cache.GasChunkEnd.data(), Cache.GasChunkCost.data(),
                       EVMMod->CodeSize);
 
+  // Analyze bytecode for potential splitting
+  EVMAnalyzer Analyzer;
+  bool AnalysisSuccess = Analyzer.analyze(
+      reinterpret_cast<const uint8_t *>(EVMMod->Code), EVMMod->CodeSize);
+
   MModule Mod(Ctx);
+
+  if (AnalysisSuccess && Analyzer.shouldSplitBlock()) {
+    // Store analyzer results in context for later use by buildEVMFunction
+    // This is a temporary approach until Task 2.2 enhances buildEVMFunction
+    Ctx.SplitAnalyzer = &Analyzer;
+    Ctx.UseSplitting = true;
+  } else {
+    // Single function compilation path (backward compatibility)
+    Ctx.UseSplitting = false;
+  }
+
   buildEVMFunction(Ctx, Mod, *EVMMod);
   Ctx.CodeMPool = &EVMMod->getJITCodeMemPool();
 
@@ -82,8 +99,11 @@ void EagerEVMJITCompiler::compile() {
   auto &CodeMPool = EVMMod->getJITCodeMemPool();
   uint8_t *JITCode = const_cast<uint8_t *>(CodeMPool.getMemStart());
 
-  // EVM has only 1 function, use direct single-threaded compilation
-  compileEVMToMC(Ctx, Mod, 0, Config.DisableMultipassGreedyRA);
+  // Compile all functions (single or multiple based on analysis)
+  uint32_t NumFunctions = Mod.getNumFunctions();
+  for (uint32_t FuncIdx = 0; FuncIdx < NumFunctions; ++FuncIdx) {
+    compileEVMToMC(Ctx, Mod, FuncIdx, Config.DisableMultipassGreedyRA);
+  }
   emitObjectBuffer(&Ctx);
   ZEN_ASSERT(Ctx.ExternRelocs.empty());
 
