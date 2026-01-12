@@ -41,8 +41,7 @@ MType *EVMFrontendContext::getMIRTypeFromEVMType(EVMType Type) {
   case EVMType::BYTES:
     return &I32Type; // Byte array pointer
   default:
-    throw getErrorWithPhase(ErrorCode::UnexpectedType, ErrorPhase::Compilation,
-                            ErrorSubphase::MIREmission);
+    ZEN_UNREACHABLE();
   }
 }
 
@@ -2334,8 +2333,7 @@ Opcode EVMMirBuilder::getMirOpcode(BinaryOperator BinOpr) {
   case BinaryOperator::BO_XOR:
     return OP_xor;
   default:
-    throw std::runtime_error("Unsupported EVM binary opcode: " +
-                             std::to_string(static_cast<int>(BinOpr)));
+    ZEN_UNREACHABLE();
   }
 }
 

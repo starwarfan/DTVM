@@ -629,18 +629,7 @@ private:
         handleStop();
       }
     } catch (const common::Error &E) {
-      switch (E.getCode()) {
-      case common::ErrorCode::EVMStackOverflow:
-        Builder.handleTrap(common::ErrorCode::EVMStackOverflow);
-        InDeadCode = true;
-        return true;
-      case common::ErrorCode::EVMStackUnderflow:
-        Builder.handleTrap(common::ErrorCode::EVMStackUnderflow);
-        InDeadCode = true;
-        return true;
-      default:
-        break;
-      }
+      ZEN_UNREACHABLE();
       return false;
     }
     return true;
@@ -651,10 +640,14 @@ private:
     ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
     const auto &BlockInfo = BlockInfos.at(PC);
     if (static_cast<size_t>(-BlockInfo.MinStackHeight) > EVM_MAX_STACK_SIZE) {
-      throw getError(common::ErrorCode::EVMStackUnderflow);
+      Builder.handleTrap(common::ErrorCode::EVMStackUnderflow);
+      InDeadCode = true;
+      return;
     }
     if (static_cast<size_t>(BlockInfo.MaxStackHeight) > EVM_MAX_STACK_SIZE) {
-      throw getError(common::ErrorCode::EVMStackOverflow);
+      Builder.handleTrap(common::ErrorCode::EVMStackOverflow);
+      InDeadCode = true;
+      return;
     }
     Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
                                   1024 - BlockInfo.MaxStackHeight);
@@ -896,7 +889,7 @@ private:
       handleLogImpl<4>();
       break;
     default:
-      throw getError(ErrorCode::UnsupportedOpcode);
+      ZEN_UNREACHABLE();
     }
   }
 
