@@ -68,20 +68,32 @@ void EagerEVMJITCompiler::compile() {
                       EVMMod->CodeSize);
 
   // Analyze bytecode for potential splitting
+  // Use stack-allocated analyzer and store pointer in Context
   EVMAnalyzer Analyzer;
   bool AnalysisSuccess = Analyzer.analyze(
       reinterpret_cast<const uint8_t *>(EVMMod->Code), EVMMod->CodeSize);
 
+  // Store analyzer pointer in context for use by buildEVMFunction and bytecode
+  // visitor
+  Ctx.SplitAnalyzer = &Analyzer;
+
   MModule Mod(Ctx);
 
-  if (AnalysisSuccess && Analyzer.shouldSplitBlock()) {
-    // Store analyzer results in context for later use by buildEVMFunction
-    // This is a temporary approach until Task 2.2 enhances buildEVMFunction
-    Ctx.SplitAnalyzer = &Analyzer;
+  // Check if there are split functions to determine if splitting should be used
+  const auto &splitFunctions = Analyzer.getSplitFunctions();
+  if (AnalysisSuccess && !splitFunctions.empty()) {
+    // Split analysis successful, use splitting mode
     Ctx.UseSplitting = true;
+
+    printf("[EagerEVMJITCompiler] Split analysis successful, found %zu split "
+           "functions\n",
+           splitFunctions.size());
   } else {
     // Single function compilation path (backward compatibility)
     Ctx.UseSplitting = false;
+
+    printf("[EagerEVMJITCompiler] No split functions found, using single "
+           "function mode\n");
   }
 
   buildEVMFunction(Ctx, Mod, *EVMMod);

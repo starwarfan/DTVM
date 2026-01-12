@@ -8,6 +8,7 @@
 #include "runtime/evm_instance.h"
 #include "utils/hash_utils.h"
 #include <algorithm>
+#include <cstdio>
 #include <unordered_set>
 
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
@@ -56,6 +57,45 @@ void buildEVMFunction(EVMFrontendContext &Context, MModule &MMod,
   CompileVector<MType *> MParamTypes(1, Context.ThreadMemPool);
   MParamTypes[0] = MPointerType::create(Context, Context.VoidType);
   MType *MRetType = Context.getMIRTypeFromEVMType(EVMType::VOID);
+
+  // Check if splitting is enabled and split functions are available
+  if (Context.UseSplitting && Context.SplitAnalyzer) {
+    const auto &splitFunctions = Context.SplitAnalyzer->getSplitFunctions();
+
+    if (!splitFunctions.empty()) {
+      // Build multiple EVM functions based on split analysis results
+      uint32_t totalFunctions = Context.SplitAnalyzer->getTotalFunctionCount();
+
+      printf(
+          "[buildEVMFunction] Creating %u functions based on split analysis\n",
+          totalFunctions);
+
+      // Create function types for all split functions (including main function
+      // at index 0)
+      for (uint32_t funcIdx = 0; funcIdx < totalFunctions; ++funcIdx) {
+        MFunctionType *funcType =
+            MFunctionType::create(Context, *MRetType, MParamTypes);
+        MMod.addFuncType(funcType);
+
+        printf("[buildEVMFunction] Added function type for index %u\n",
+               funcIdx);
+      }
+
+      // Print split function information for debugging
+      for (const auto &entry : splitFunctions) {
+        const auto &info = entry.second;
+        printf("[buildEVMFunction] Split function %u: PC [%lu, %lu), "
+               "StackHeight [%d -> %d]\n",
+               info.FunctionIndex, info.StartPC, info.EndPC,
+               info.StackHeightAtStart, info.StackHeightAtEnd);
+      }
+
+      return;
+    }
+  }
+
+  // Single function compilation path (backward compatibility)
+  printf("[buildEVMFunction] Creating single function (no splitting)\n");
   MMod.addFuncType(MFunctionType::create(Context, *MRetType, MParamTypes));
 }
 

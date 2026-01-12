@@ -53,12 +53,26 @@ private:
       const uint8_t *Bytecode =
           reinterpret_cast<const uint8_t *>(Ctx->getBytecode());
       size_t BytecodeSize = Ctx->getBytecodeSize();
-      EVMAnalyzer Analyzer;
-      Analyzer.analyze(Bytecode, BytecodeSize);
 
-      // Set up split information in the builder if splitting is enabled
-      if (Analyzer.shouldSplitBlock()) {
-        Builder.setSplitInfo(&Analyzer.getSplitFunctions());
+      // Get analyzer: use existing one from Context or create new one
+      const auto *contextAnalyzer =
+          static_cast<const EVMFrontendContext *>(Ctx)->SplitAnalyzer;
+      EVMAnalyzer localAnalyzer;
+      const EVMAnalyzer *Analyzer = nullptr;
+
+      if (contextAnalyzer) {
+        // Use existing analysis results from Context
+        Analyzer = contextAnalyzer;
+      } else {
+        // Fallback: create and run analysis
+        localAnalyzer.analyze(Bytecode, BytecodeSize);
+        Analyzer = &localAnalyzer;
+      }
+
+      // Set up split information in the builder if there are split functions
+      const auto &splitFunctions = Analyzer->getSplitFunctions();
+      if (!splitFunctions.empty()) {
+        Builder.setSplitInfo(&splitFunctions);
       }
 
       const uint8_t *Ip = Bytecode;
@@ -66,7 +80,7 @@ private:
           BytecodeSize > 0 &&
           static_cast<evmc_opcode>(Bytecode[0]) == OP_JUMPDEST;
       if (!StartsWithJumpDest) {
-        handleBeginBlock(Analyzer);
+        handleBeginBlock(*Analyzer);
       }
       const uint8_t *IpEnd = Bytecode + BytecodeSize;
 
@@ -575,7 +589,7 @@ private:
           Operand Cond = pop();
           handleEndBlock();
           Builder.handleJumpI(Dest, Cond);
-          handleBeginBlock(Analyzer);
+          handleBeginBlock(*Analyzer);
           break;
         }
 
@@ -583,7 +597,7 @@ private:
           handleEndBlock();
           Builder.handleJumpDest(PC);
           Builder.meterOpcode(Opcode, PC);
-          handleBeginBlock(Analyzer);
+          handleBeginBlock(*Analyzer);
           break;
         }
 
@@ -640,7 +654,7 @@ private:
     return true;
   }
 
-  void handleBeginBlock(EVMAnalyzer &Analyzer) {
+  void handleBeginBlock(const EVMAnalyzer &Analyzer) {
     const auto &BlockInfos = Analyzer.getBlockInfos();
     ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
     const auto &BlockInfo = BlockInfos.at(PC);

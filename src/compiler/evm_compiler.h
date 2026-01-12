@@ -5,6 +5,7 @@
 #define ZEN_EVM_COMPILER_COMPILER_H
 
 #include "compiler/compiler.h"
+#include "compiler/evm_frontend/evm_analyzer.h"
 #include "compiler/evm_frontend/evm_mir_compiler.h"
 #include "runtime/evm_module.h"
 
