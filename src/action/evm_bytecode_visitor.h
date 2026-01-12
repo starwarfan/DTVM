@@ -573,8 +573,8 @@ private:
           InDeadCode = false;
           handleEndBlock();
           Builder.handleJumpDest(PC);
-          handleBeginBlock(Analyzer);
           Builder.meterOpcode(Opcode, PC);
+          handleBeginBlock(Analyzer);
           break;
         }
 
