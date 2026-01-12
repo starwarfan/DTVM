@@ -7,6 +7,7 @@
 #include "compiler/mir/module.h"
 #include "runtime/evm_instance.h"
 #include "utils/hash_utils.h"
+#include <algorithm>
 #include <unordered_set>
 
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
@@ -3117,4 +3118,77 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleReturnDataSize() {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<uint64_t>(RuntimeFunctions.GetReturnDataSize);
 }
+// ==================== Split Function Support Implementation
+// ====================
+
+void EVMMirBuilder::handleInternalCall(uint32_t funcIdx) {
+  // Create a direct call instruction to the specified function index
+  // All split functions share the same signature as the main function (void* ->
+  // void)
+  MType *VoidType = &Ctx.VoidType;
+
+  // Create argument list with instance pointer (same as main EVM function
+  // signature)
+  CompileVector<MInstruction *> Args(1, Ctx.MemPool);
+  Args[0] = createInstruction<DreadInstruction>(false, createVoidPtrType(), 0);
+
+  // Create the call instruction using the standard createInstruction template
+  CallInstruction *CallInst =
+      createInstruction<CallInstruction>(false, VoidType, funcIdx, Args);
+
+  // Note: CallInstruction is automatically inserted into current basic block by
+  // createInstruction
+}
+
+void EVMMirBuilder::setSplitInfo(
+    const std::map<uint64_t, EVMAnalyzer::SplitInfo> *splitInfo) {
+  SplitInfo = splitInfo;
+}
+
+bool EVMMirBuilder::isAtSplitPoint(uint64_t pc) const {
+  if (!SplitInfo) {
+    return false;
+  }
+
+  // Check if this PC is the start of any split function
+  for (const auto &entry : *SplitInfo) {
+    if (entry.second.StartPC == pc) {
+      return true;
+    }
+  }
+  return false;
+}
+
+uint32_t EVMMirBuilder::getFunctionIndexForPC(uint64_t pc) const {
+  if (!SplitInfo) {
+    return 0; // Main function index
+  }
+
+  // Find the split function that contains this PC
+  for (const auto &entry : *SplitInfo) {
+    const EVMAnalyzer::SplitInfo &info = entry.second;
+    if (pc >= info.StartPC && pc < info.EndPC) {
+      return info.FunctionIndex;
+    }
+  }
+
+  return 0; // Default to main function if not found in any split
+}
+
+uint64_t EVMMirBuilder::getSplitEndPC(uint64_t startPC) const {
+  if (!SplitInfo) {
+    return startPC; // No split info available
+  }
+
+  // Find the split function that starts at this PC
+  for (const auto &entry : *SplitInfo) {
+    const EVMAnalyzer::SplitInfo &info = entry.second;
+    if (info.StartPC == startPC) {
+      return info.EndPC;
+    }
+  }
+
+  return startPC; // Not found, return same PC
+}
+
 } // namespace COMPILER

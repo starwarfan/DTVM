@@ -6,6 +6,7 @@
 
 #include "action/vm_eval_stack.h"
 #include "compiler/context.h"
+#include "compiler/evm_frontend/evm_analyzer.h"
 #include "compiler/mir/function.h"
 #include "compiler/mir/instructions.h"
 #include "compiler/mir/pointer.h"
@@ -16,7 +17,6 @@
 // Forward declaration to avoid circular dependency
 namespace COMPILER {
 struct RuntimeFunctions;
-class EVMAnalyzer; // Forward declaration
 } // namespace COMPILER
 
 namespace zen::runtime {
@@ -423,9 +423,29 @@ public:
   void handleTStore(Operand Index, Operand ValueComponents);
   void handleSelfDestruct(Operand Beneficiary);
 
+  // ==================== Split Function Support ====================
+
+  // Handle internal function call for split EVM blocks
+  void handleInternalCall(uint32_t funcIdx);
+
+  // Set split information from analyzer
+  void
+  setSplitInfo(const std::map<uint64_t, EVMAnalyzer::SplitInfo> *splitInfo);
+
+  // Check if current PC is at a split point
+  bool isAtSplitPoint(uint64_t pc) const;
+
+  // Get function index for a given PC
+  uint32_t getFunctionIndexForPC(uint64_t pc) const;
+
+  // Get end PC for a split function starting at given PC
+  uint64_t getSplitEndPC(uint64_t startPC) const;
+
   // ==================== Runtime Interface for JIT ====================
 
 private:
+  // Split function context
+  const std::map<uint64_t, EVMAnalyzer::SplitInfo> *SplitInfo = nullptr;
   // ==================== Operand Methods ====================
 
   U256Inst extractU256Operand(const Operand &Opnd);
