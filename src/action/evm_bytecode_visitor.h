@@ -25,9 +25,9 @@ public:
     ZEN_ASSERT(Ctx);
   }
 
-  bool compile() {
+  bool compile(uint32_t funcIdx = 0) {
     Builder.initEVM(Ctx);
-    bool Ret = decode();
+    bool Ret = decode(funcIdx);
     Builder.finalizeEVMBase();
     return Ret;
   }
@@ -48,7 +48,7 @@ private:
     return Opnd;
   }
 
-  bool decode() {
+  bool decode(uint32_t funcIdx = 0) {
     try {
       const uint8_t *Bytecode =
           reinterpret_cast<const uint8_t *>(Ctx->getBytecode());
@@ -75,19 +75,57 @@ private:
         Builder.setSplitInfo(&splitFunctions);
       }
 
-      const uint8_t *Ip = Bytecode;
+      // Determine PC range based on funcIdx
+      uint64_t startPC = 0;
+      uint64_t endPC = BytecodeSize;
+
+      if (funcIdx != 0 && !splitFunctions.empty()) {
+        // Find the split function with the given funcIdx
+        bool foundSplitFunction = false;
+        for (const auto &entry : splitFunctions) {
+          const auto &splitInfo = entry.second;
+          if (splitInfo.FunctionIndex == funcIdx) {
+            startPC = splitInfo.StartPC;
+            endPC = splitInfo.EndPC;
+            foundSplitFunction = true;
+            printf("[EVMByteCodeVisitor] Compiling split function %u: PC [%lu, "
+                   "%lu)\n",
+                   funcIdx, startPC, endPC);
+            break;
+          }
+        }
+
+        if (!foundSplitFunction) {
+          printf("[EVMByteCodeVisitor] Error: Split function %u not found\n",
+                 funcIdx);
+          return false;
+        }
+      } else {
+        printf("[EVMByteCodeVisitor] Compiling main function: PC [%lu, %lu)\n",
+               startPC, endPC);
+      }
+
+      const uint8_t *Ip = Bytecode + startPC;
       const bool StartsWithJumpDest =
-          BytecodeSize > 0 &&
-          static_cast<evmc_opcode>(Bytecode[0]) == OP_JUMPDEST;
+          startPC < BytecodeSize &&
+          static_cast<evmc_opcode>(Bytecode[startPC]) == OP_JUMPDEST;
       if (!StartsWithJumpDest) {
         handleBeginBlock(*Analyzer);
       }
-      const uint8_t *IpEnd = Bytecode + BytecodeSize;
+      const uint8_t *IpEnd = Bytecode + endPC;
 
       while (Ip < IpEnd) {
         evmc_opcode Opcode = static_cast<evmc_opcode>(*Ip);
         ptrdiff_t Diff = Ip - Bytecode;
         PC = static_cast<uint64_t>(Diff >= 0 ? Diff : 0);
+
+        // Check if we've reached the end of the split function
+        if (funcIdx != 0 && PC >= endPC) {
+          printf("[EVMByteCodeVisitor] Reached end of split function %u at PC "
+                 "%lu\n",
+                 funcIdx, PC);
+          break;
+        }
 
         Ip++;
 
@@ -101,12 +139,14 @@ private:
           continue;
         }
 
-        // Check for split points and handle internal calls
-        if (Builder.isAtSplitPoint(PC)) {
-          uint32_t funcIdx = Builder.getFunctionIndexForPC(PC);
-          Builder.handleInternalCall(funcIdx);
-
-          // Skip to the end of this split function
+        // Check for split points and handle internal calls (only for main
+        // function)
+        if (funcIdx == 0 && Builder.isAtSplitPoint(PC)) {
+          size_t TotalPopSize = Stack.getSize();
+          handleEndBlock();
+          uint32_t splitFuncIdx = Builder.getFunctionIndexForPC(PC);
+          // Builder.handleInternalCall(splitFuncIdx);
+          //  Skip to the end of this split function
           uint64_t endPC = Builder.getSplitEndPC(PC);
           Ip = Bytecode + endPC;
           continue;

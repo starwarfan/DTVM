@@ -123,9 +123,9 @@ EVMFrontendContext::EVMFrontendContext(const EVMFrontendContext &OtherCtx)
 EVMMirBuilder::EVMMirBuilder(CompilerContext &Context, MFunction &MFunc)
     : Ctx(Context), CurFunc(&MFunc) {}
 
-bool EVMMirBuilder::compile(CompilerContext *Context) {
+bool EVMMirBuilder::compile(CompilerContext *Context, uint32_t funcIdx) {
   EVMByteCodeVisitor<EVMMirBuilder> Visitor(*this, Context);
-  return Visitor.compile();
+  return Visitor.compile(funcIdx);
 }
 
 void EVMMirBuilder::loadEVMInstanceAttr() {

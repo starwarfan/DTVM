@@ -181,7 +181,7 @@ public:
     bool IsU256MultiComponent = false;
   };
 
-  bool compile(CompilerContext *Context);
+  bool compile(CompilerContext *Context, uint32_t funcIdx = 0);
   void loadEVMInstanceAttr();
   void loadStackVariables();
   void saveStackVariables();

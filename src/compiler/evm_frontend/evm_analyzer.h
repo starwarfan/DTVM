@@ -22,8 +22,8 @@ public:
   EVMAnalyzer() {}
 
   // Configuration constants for block splitting
-  static constexpr uint32_t DEFAULT_BLOCK_SIZE_THRESHOLD = 1000;
-  static constexpr uint32_t SPLIT_SEARCH_WINDOW = 50;
+  static constexpr uint32_t DEFAULT_BLOCK_SIZE_THRESHOLD = 10;
+  static constexpr uint32_t SPLIT_SEARCH_WINDOW = 2;
 
   struct BlockInfo {
     uint64_t EntryPC = 0;
