@@ -84,10 +84,8 @@ void buildEVMFunction(EVMFrontendContext &Context, MModule &MMod,
       // Print split function information for debugging
       for (const auto &entry : splitFunctions) {
         const auto &info = entry.second;
-        printf("[buildEVMFunction] Split function %u: PC [%lu, %lu), "
-               "StackHeight [%d -> %d]\n",
-               info.FunctionIndex, info.StartPC, info.EndPC,
-               info.StackHeightAtStart, info.StackHeightAtEnd);
+        printf("[buildEVMFunction] Split function %u: PC [%lu, %lu), \n",
+               info.FunctionIndex, info.StartPC, info.EndPC);
       }
 
       return;
@@ -589,6 +587,11 @@ void EVMMirBuilder::createStackCheckBlock(int32_t MinSize, int32_t MaxSize) {
   addUniqueSuccessor(StackOverflowBB);
   addSuccessor(FollowBB);
   setInsertBlock(FollowBB);
+}
+
+void EVMMirBuilder::startBlock() {
+  // load stack size/top to memory to break their live ranges.
+  loadStackVariables();
 }
 
 void EVMMirBuilder::finishBlock() {
@@ -3169,12 +3172,11 @@ void EVMMirBuilder::handleInternalCall(uint32_t funcIdx) {
 
   // Create argument list with instance pointer (same as main EVM function
   // signature)
-  CompileVector<MInstruction *> Args(1, Ctx.MemPool);
-  Args[0] = createInstruction<DreadInstruction>(false, createVoidPtrType(), 0);
-
+  MInstruction *InstancePtr = getCurrentInstancePointer();
+  std::vector<MInstruction *> Args = {InstancePtr};
   // Create the call instruction using the standard createInstruction template
   CallInstruction *CallInst =
-      createInstruction<CallInstruction>(false, VoidType, funcIdx, Args);
+      createInstruction<CallInstruction>(true, VoidType, funcIdx, Args);
 
   // Note: CallInstruction is automatically inserted into current basic block by
   // createInstruction

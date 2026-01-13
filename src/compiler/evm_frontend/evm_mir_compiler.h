@@ -200,6 +200,7 @@ public:
 
   // Block for stack check instructions
   void createStackCheckBlock(int32_t MinSize, int32_t MaxSize);
+  void startBlock();
   void finishBlock();
 
   // ==================== Stack Instruction Handlers ====================

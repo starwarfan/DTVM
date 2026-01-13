@@ -22,19 +22,25 @@ public:
   EVMAnalyzer() {}
 
   // Configuration constants for block splitting
-  static constexpr uint32_t DEFAULT_BLOCK_SIZE_THRESHOLD = 10;
-  static constexpr uint32_t SPLIT_SEARCH_WINDOW = 2;
+  static constexpr uint32_t DEFAULT_BLOCK_SIZE_THRESHOLD = 1000;
+  static constexpr uint32_t SPLIT_SEARCH_WINDOW = 20;
 
   struct BlockInfo {
     uint64_t EntryPC = 0;
+    uint64_t EndPC = 0;
     int32_t MaxStackHeight = 0;
     int32_t MinStackHeight = 0;
     int32_t MinPopHeight = 0;
     int32_t StackHeightDiff = 0;
-    bool IsJumpDest = false;
 
     BlockInfo() = default;
     BlockInfo(uint64_t PC) : EntryPC(PC) {}
+  };
+
+  struct SplitState {
+    std::vector<uint64_t> SplitPoints;
+    uint32_t LastOpcodeCount = 0;
+    uint64_t LastStackDiff = 0;
   };
 
   // Structure to store split function metadata
@@ -42,23 +48,14 @@ public:
     uint64_t StartPC = 0;
     uint64_t EndPC = 0;
     uint32_t FunctionIndex = 0;
-    int32_t StackHeightAtStart = 0;
-    int32_t StackHeightAtEnd = 0;
 
     SplitInfo() = default;
-    SplitInfo(uint64_t start, uint64_t end, uint32_t funcIdx,
-              int32_t startHeight, int32_t endHeight)
-        : StartPC(start), EndPC(end), FunctionIndex(funcIdx),
-          StackHeightAtStart(startHeight), StackHeightAtEnd(endHeight) {}
+    SplitInfo(uint64_t start, uint64_t end, uint32_t funcIdx)
+        : StartPC(start), EndPC(end), FunctionIndex(funcIdx) {}
   };
 
   const std::map<uint64_t, BlockInfo> &getBlockInfos() const {
     return BlockInfos;
-  }
-
-  // Check if a given opcode count exceeds the threshold
-  bool shouldSplitBlock(uint32_t opcodeCount) const {
-    return opcodeCount > DEFAULT_BLOCK_SIZE_THRESHOLD;
   }
 
   // Get split function information
@@ -146,13 +143,14 @@ public:
 
   bool analyze(const uint8_t *Bytecode, size_t BytecodeSize) {
     BlockInfos.clear();
-    OpcodeStackHeights.clear(); // Reset stack height tracking
     const uint8_t *Ip = Bytecode;
     const uint8_t *IpEnd = Bytecode + BytecodeSize;
 
     // Initialize block info for the first block
     BlockInfo CurInfo(0);
-    uint32_t CurrentBlockOpcodeCount = 0; // Track opcode count per block
+    // Track opcode count per block
+    uint32_t CurrentBlockOpcodeCount = 0;
+    SplitState SplitState;
 
     while (Ip < IpEnd) {
       evmc_opcode Opcode = static_cast<evmc_opcode>(*Ip);
@@ -163,9 +161,6 @@ public:
 
       // Count this opcode (excluding PUSH instruction data bytes)
       CurrentBlockOpcodeCount++;
-
-      // Record stack height at this PC for split analysis
-      OpcodeStackHeights.emplace_back(PC, CurInfo.StackHeightDiff);
 
       // Calculate stack operations for each opcode
       int PopCount = 0;
@@ -426,25 +421,20 @@ public:
 
       if (IsBlockStart) {
         if (PC != CurInfo.EntryPC) {
+          CurInfo.EndPC = PC;
           // Check if current block should be split before saving
-          if (shouldSplitBlock(CurrentBlockOpcodeCount)) {
-            findOptimalSplitPointsForBlock(CurInfo, Bytecode, BytecodeSize,
-                                           CurrentBlockOpcodeCount);
-          }
+          updateSplitFunctionsIfNeeded(SplitState, CurInfo,
+                                       CurrentBlockOpcodeCount);
           BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
         }
         // Create new block info and reset opcode count
         CurInfo = BlockInfo(PC);
         CurrentBlockOpcodeCount = 0; // Reset opcode count for new block
-        if (Opcode == OP_JUMPDEST) {
-          CurInfo.IsJumpDest = true;
-        }
       } else if (IsBlockEnd) {
+        CurInfo.EndPC = PC;
         // Check if current block should be split before saving
-        if (shouldSplitBlock(CurrentBlockOpcodeCount)) {
-          findOptimalSplitPointsForBlock(CurInfo, Bytecode, BytecodeSize,
-                                         CurrentBlockOpcodeCount);
-        }
+        updateSplitFunctionsIfNeeded(SplitState, CurInfo,
+                                     CurrentBlockOpcodeCount);
         // Save current block info
         BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
         // Reset opcode count for next block
@@ -462,14 +452,16 @@ public:
             Ip += NumBytes;
           }
         }
+      } else {
+        updateSplitPointsIfNeeded(SplitState, PC, CurrentBlockOpcodeCount,
+                                  CurInfo.StackHeightDiff);
       }
     }
     if (BlockInfos.count(CurInfo.EntryPC) == 0) {
+      CurInfo.EndPC = Ip - Bytecode;
       // Check if final block should be split before saving
-      if (shouldSplitBlock(CurrentBlockOpcodeCount)) {
-        findOptimalSplitPointsForBlock(CurInfo, Bytecode, BytecodeSize,
-                                       CurrentBlockOpcodeCount);
-      }
+      updateSplitFunctionsIfNeeded(SplitState, CurInfo,
+                                   CurrentBlockOpcodeCount);
       BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
     }
 
@@ -480,9 +472,8 @@ public:
              static_cast<uint32_t>(SplitFunctions.size()));
       for (const auto &entry : SplitFunctions) {
         const SplitInfo &info = entry.second;
-        printf("  Function %u: PC [%lu, %lu), StackHeight [%d -> %d]\n",
-               info.FunctionIndex, info.StartPC, info.EndPC,
-               info.StackHeightAtStart, info.StackHeightAtEnd);
+        printf("  Function %u: PC [%lu, %lu), \n", info.FunctionIndex,
+               info.StartPC, info.EndPC);
       }
     } else {
       printf("[EVMAnalyzer] No split functions generated\n");
@@ -491,307 +482,54 @@ public:
     return true;
   }
 
-  // Find optimal split points for a specific block (per-block splitting)
-  std::vector<uint64_t>
-  findOptimalSplitPointsForBlock(const BlockInfo &blockInfo,
-                                 const uint8_t *Bytecode, size_t BytecodeSize,
-                                 uint32_t blockOpcodeCount) {
-    std::vector<uint64_t> splitPoints;
-
-    if (!shouldSplitBlock(blockOpcodeCount)) {
-      return splitPoints;
+  bool updateSplitPointsIfNeeded(SplitState &State, uint64_t PC,
+                                 uint32_t OpcodeCount, uint64_t StackDiff) {
+    if (OpcodeCount - State.LastOpcodeCount >= DEFAULT_BLOCK_SIZE_THRESHOLD) {
+      State.SplitPoints.push_back(PC);
+      State.LastOpcodeCount = OpcodeCount;
+      State.LastStackDiff = StackDiff;
+      return true;
     }
-
-    // Find the end PC of this block
-    uint64_t blockStartPC = blockInfo.EntryPC;
-    uint64_t blockEndPC = findBlockEndPC(blockStartPC, Bytecode, BytecodeSize);
-
-    // Calculate target split intervals within this block
-    uint32_t numSplits = (blockOpcodeCount + DEFAULT_BLOCK_SIZE_THRESHOLD - 1) /
-                         DEFAULT_BLOCK_SIZE_THRESHOLD;
-    if (numSplits <= 1) {
-      return splitPoints;
-    }
-
-    // Find split points at regular intervals within the block
-    for (uint32_t i = 1; i < numSplits; i++) {
-      uint64_t targetPC =
-          blockStartPC + ((i * (blockEndPC - blockStartPC)) / numSplits);
-      uint64_t optimalPC = findBestSplitPointInBlock(targetPC, blockStartPC,
-                                                     blockEndPC, Bytecode);
-      if (optimalPC != UINT64_MAX && optimalPC > blockStartPC &&
-          optimalPC < blockEndPC) {
-        splitPoints.push_back(optimalPC);
-      }
-    }
-
-    // Create split function metadata for this block
-    if (!splitPoints.empty()) {
-      uint64_t lastPC = blockStartPC;
-      for (size_t i = 0; i < splitPoints.size(); i++) {
-        uint64_t startPC = lastPC;
-        uint64_t endPC = splitPoints[i];
-        int32_t startHeight = getStackHeightAtPC(startPC);
-        int32_t endHeight = getStackHeightAtPC(endPC);
-
-        SplitFunctions.emplace(startPC,
-                               SplitInfo(startPC, endPC, NextFunctionIndex++,
-                                         startHeight, endHeight));
-        lastPC = endPC;
-      }
-
-      // Add the final segment of the block
-      int32_t startHeight = getStackHeightAtPC(lastPC);
-      int32_t endHeight = getStackHeightAtPC(blockEndPC);
-      SplitFunctions.emplace(lastPC,
-                             SplitInfo(lastPC, blockEndPC, NextFunctionIndex++,
-                                       startHeight, endHeight));
-    }
-
-    return splitPoints;
+    // if (!State.SplitPoints.empty() &&
+    //     OpcodeCount - State.LastOpcodeCount <= SPLIT_SEARCH_WINDOW &&
+    //     StackDiff < State.LastStackDiff) {
+    //   State.SplitPoints.back() = PC;
+    //   State.LastOpcodeCount = OpcodeCount;
+    //   State.LastStackDiff = StackDiff;
+    //   return true;
+    // }
+    return false;
   }
 
-  // Legacy method - kept for compatibility but now delegates to per-block logic
-  std::vector<uint64_t> findOptimalSplitPoints(const uint8_t *Bytecode,
-                                               size_t BytecodeSize) {
-    std::vector<uint64_t> splitPoints;
-    SplitFunctions.clear();
-    NextFunctionIndex = 1;
-
-    // Process each block individually
-    for (const auto &entry : BlockInfos) {
-      const BlockInfo &blockInfo = entry.second;
-      uint64_t blockStartPC = blockInfo.EntryPC;
-      uint64_t blockEndPC =
-          findBlockEndPC(blockStartPC, Bytecode, BytecodeSize);
-      uint32_t blockOpcodeCount =
-          countOpcodesInBlock(blockStartPC, blockEndPC, Bytecode);
-
-      std::vector<uint64_t> blockSplitPoints = findOptimalSplitPointsForBlock(
-          blockInfo, Bytecode, BytecodeSize, blockOpcodeCount);
-      splitPoints.insert(splitPoints.end(), blockSplitPoints.begin(),
-                         blockSplitPoints.end());
+  bool updateSplitFunctionsIfNeeded(SplitState &State, const BlockInfo &CurInfo,
+                                    uint32_t OpcodeCount) {
+    // Update split functions based on BlockInfo
+    auto &SplitPoints = State.SplitPoints;
+    if (!SplitPoints.empty() && OpcodeCount - State.LastOpcodeCount <
+                                    DEFAULT_BLOCK_SIZE_THRESHOLD / 2) {
+      SplitPoints.pop_back();
     }
-
-    // Sort all split points
-    std::sort(splitPoints.begin(), splitPoints.end());
-
-    return splitPoints;
-  }
-
-  // Find the best split point within a search window around target PC (within a
-  // block)
-  uint64_t findBestSplitPointInBlock(uint64_t targetPC, uint64_t blockStartPC,
-                                     uint64_t blockEndPC,
-                                     const uint8_t *Bytecode) {
-    uint64_t bestPC = UINT64_MAX;
-    int32_t bestStackHeightDiff = INT32_MAX;
-
-    // Define search window within the block boundaries
-    uint64_t windowStart =
-        std::max(blockStartPC, (targetPC > SPLIT_SEARCH_WINDOW)
-                                   ? (targetPC - SPLIT_SEARCH_WINDOW)
-                                   : blockStartPC);
-    uint64_t windowEnd = std::min(blockEndPC, targetPC + SPLIT_SEARCH_WINDOW);
-
-    // Search for the best split point within the window
-    for (uint64_t pc = windowStart; pc < windowEnd; pc++) {
-      if (isValidSplitPointInBlock(pc, blockStartPC, blockEndPC, Bytecode)) {
-        int32_t stackHeight = getStackHeightAtPC(pc);
-        int32_t stackHeightDiff = std::abs(stackHeight);
-
-        if (stackHeightDiff < bestStackHeightDiff) {
-          bestStackHeightDiff = stackHeightDiff;
-          bestPC = pc;
-
-          // If we find a perfect split point (stack height 0), use it
-          if (stackHeightDiff == 0) {
-            break;
-          }
-        }
-      }
+    if (SplitPoints.empty()) {
+      return false;
     }
+    SplitPoints.push_back(CurInfo.EndPC);
 
-    return bestPC;
-  }
-
-  // Legacy method - kept for compatibility
-  uint64_t findBestSplitPoint(uint64_t targetPC, const uint8_t *Bytecode,
-                              size_t BytecodeSize) {
-    uint64_t bestPC = UINT64_MAX;
-    int32_t bestStackHeightDiff = INT32_MAX;
-
-    // Define search window
-    uint64_t windowStart =
-        (targetPC > SPLIT_SEARCH_WINDOW) ? (targetPC - SPLIT_SEARCH_WINDOW) : 0;
-    uint64_t windowEnd = std::min(targetPC + SPLIT_SEARCH_WINDOW,
-                                  static_cast<uint64_t>(BytecodeSize));
-
-    // Search for the best split point within the window
-    for (uint64_t pc = windowStart; pc < windowEnd; pc++) {
-      if (isValidSplitPoint(pc, Bytecode, BytecodeSize)) {
-        int32_t stackHeight = getStackHeightAtPC(pc);
-        int32_t stackHeightDiff = std::abs(stackHeight);
-
-        if (stackHeightDiff < bestStackHeightDiff) {
-          bestStackHeightDiff = stackHeightDiff;
-          bestPC = pc;
-
-          // If we find a perfect split point (stack height 0), use it
-          if (stackHeightDiff == 0) {
-            break;
-          }
-        }
-      }
+    for (size_t I = 0; I + 1 < SplitPoints.size(); I++) {
+      SplitInfo Split(SplitPoints[I], SplitPoints[I + 1], NextFunctionIndex++);
+      SplitFunctions.emplace(Split.StartPC, Split);
     }
-
-    return bestPC;
+    SplitPoints.clear();
+    State.LastOpcodeCount = 0;
+    State.LastStackDiff = 0;
+    return true;
   }
 
 private:
   std::map<uint64_t, BlockInfo> BlockInfos;
   std::map<uint64_t, SplitInfo> SplitFunctions; // Split function metadata
-  std::vector<std::pair<uint64_t, int32_t>>
-      OpcodeStackHeights; // PC -> StackHeight mapping for split analysis
   uint64_t PC = 0;
-  uint32_t NextFunctionIndex =
-      1; // Next available function index (0 is main function)
-
-  // Helper methods for split point analysis
-
-  // Find the end PC of a block starting from blockStartPC
-  uint64_t findBlockEndPC(uint64_t blockStartPC, const uint8_t *Bytecode,
-                          size_t BytecodeSize) const {
-    const uint8_t *Ip = Bytecode + blockStartPC;
-    const uint8_t *IpEnd = Bytecode + BytecodeSize;
-    uint64_t currentPC = blockStartPC;
-
-    while (Ip < IpEnd) {
-      evmc_opcode opcode = static_cast<evmc_opcode>(*Ip);
-      Ip++;
-      currentPC++;
-
-      // Check if this is a block ending opcode
-      bool IsBlockEnd = (opcode == OP_JUMP || opcode == OP_RETURN ||
-                         opcode == OP_STOP || opcode == OP_INVALID ||
-                         opcode == OP_REVERT || opcode == OP_SELFDESTRUCT);
-
-      if (IsBlockEnd) {
-        return currentPC;
-      }
-
-      // Handle PUSH instructions
-      if (opcode >= OP_PUSH0 && opcode <= OP_PUSH32) {
-        uint8_t pushBytes = opcode - OP_PUSH0;
-        Ip += pushBytes;
-        currentPC += pushBytes;
-      }
-
-      // Check if next instruction is a block start (JUMPDEST)
-      if (Ip < IpEnd) {
-        evmc_opcode nextOpcode = static_cast<evmc_opcode>(*Ip);
-        if (nextOpcode == OP_JUMPDEST) {
-          return currentPC;
-        }
-      }
-    }
-
-    return BytecodeSize; // End of bytecode
-  }
-
-  // Count opcodes in a specific block range
-  uint32_t countOpcodesInBlock(uint64_t blockStartPC, uint64_t blockEndPC,
-                               const uint8_t *Bytecode) const {
-    const uint8_t *Ip = Bytecode + blockStartPC;
-    const uint8_t *IpEnd = Bytecode + blockEndPC;
-    uint32_t opcodeCount = 0;
-
-    while (Ip < IpEnd) {
-      evmc_opcode opcode = static_cast<evmc_opcode>(*Ip);
-      Ip++;
-      opcodeCount++;
-
-      // Handle PUSH instructions
-      if (opcode >= OP_PUSH0 && opcode <= OP_PUSH32) {
-        uint8_t pushBytes = opcode - OP_PUSH0;
-        Ip += pushBytes;
-      }
-    }
-
-    return opcodeCount;
-  }
-
-  // Check if a PC is a valid split point within a specific block
-  bool isValidSplitPointInBlock(uint64_t pc, uint64_t blockStartPC,
-                                uint64_t blockEndPC,
-                                const uint8_t *Bytecode) const {
-    if (pc <= blockStartPC || pc >= blockEndPC) {
-      return false;
-    }
-
-    return isValidSplitPoint(pc, Bytecode, blockEndPC);
-  }
-
-  bool isValidSplitPoint(uint64_t pc, const uint8_t *Bytecode,
-                         size_t BytecodeSize) const {
-    if (pc >= BytecodeSize) {
-      return false;
-    }
-
-    // Check if this PC is at the start of an instruction (not in the middle of
-    // PUSH data)
-    const uint8_t *Ip = Bytecode;
-    const uint8_t *IpEnd = Bytecode + BytecodeSize;
-    uint64_t currentPC = 0;
-
-    while (Ip < IpEnd && currentPC <= pc) {
-      if (currentPC == pc) {
-        // This PC is at the start of an instruction
-        evmc_opcode opcode = static_cast<evmc_opcode>(*Ip);
-
-        // Don't split in the middle of PUSH instructions or at invalid opcodes
-        if (opcode >= OP_PUSH0 && opcode <= OP_PUSH32) {
-          return false;
-        }
-        if (opcode == OP_INVALID) {
-          return false;
-        }
-
-        // Don't split at jump destinations (they should remain as block entry
-        // points)
-        if (opcode == OP_JUMPDEST) {
-          return false;
-        }
-
-        return true;
-      }
-
-      // Advance to next instruction
-      evmc_opcode opcode = static_cast<evmc_opcode>(*Ip);
-      Ip++;
-      currentPC++;
-
-      if (opcode >= OP_PUSH0 && opcode <= OP_PUSH32) {
-        uint8_t pushBytes = opcode - OP_PUSH0;
-        Ip += pushBytes;
-        currentPC += pushBytes;
-      }
-    }
-
-    return false;
-  }
-
-  int32_t getStackHeightAtPC(uint64_t pc) const {
-    // Find the stack height at the given PC from our recorded data
-    for (const auto &entry : OpcodeStackHeights) {
-      if (entry.first == pc) {
-        return entry.second;
-      }
-    }
-
-    // If not found, return 0 (this shouldn't happen in normal operation)
-    return 0;
-  }
+  // Next available function index (0 is main function)
+  uint32_t NextFunctionIndex = 1;
 };
 
 } // namespace COMPILER

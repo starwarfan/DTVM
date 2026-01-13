@@ -110,7 +110,11 @@ private:
           startPC < BytecodeSize &&
           static_cast<evmc_opcode>(Bytecode[startPC]) == OP_JUMPDEST;
       if (!StartsWithJumpDest) {
-        handleBeginBlock(*Analyzer);
+        if (funcIdx == 0) {
+          handleBeginBlock(*Analyzer);
+        } else {
+          Builder.startBlock();
+        }
       }
       const uint8_t *IpEnd = Bytecode + endPC;
 
@@ -124,6 +128,7 @@ private:
           printf("[EVMByteCodeVisitor] Reached end of split function %u at PC "
                  "%lu\n",
                  funcIdx, PC);
+          handleEndBlock();
           break;
         }
 
@@ -145,10 +150,11 @@ private:
           size_t TotalPopSize = Stack.getSize();
           handleEndBlock();
           uint32_t splitFuncIdx = Builder.getFunctionIndexForPC(PC);
-          // Builder.handleInternalCall(splitFuncIdx);
+          Builder.handleInternalCall(splitFuncIdx);
           //  Skip to the end of this split function
           uint64_t endPC = Builder.getSplitEndPC(PC);
           Ip = Bytecode + endPC;
+          Builder.startBlock();
           continue;
         }
         bool IsJumpDest = (Opcode == OP_JUMPDEST);
@@ -685,6 +691,9 @@ private:
         PC++; // offset 1 byte for opcode
       }
       if (!InDeadCode) {
+        if (funcIdx != 0) {
+          handleEndBlock();
+        }
         handleStop();
       }
     } catch (const common::Error &E) {
