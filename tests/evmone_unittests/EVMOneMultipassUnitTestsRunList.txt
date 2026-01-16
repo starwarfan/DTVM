@@ -180,4 +180,3 @@ multi_vm/evm.swapn_undefined/external_vm
 multi_vm/evm.undefined/external_vm
 multi_vm/evm.undefined_instruction_analysis_overflow/external_vm
 multi_vm/evm.undefined_instruction_block_cost_negative/external_vm
-multi_vm/evm.undefined_instructions/external_vm
