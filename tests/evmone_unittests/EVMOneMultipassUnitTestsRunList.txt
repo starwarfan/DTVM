@@ -151,7 +151,8 @@ multi_vm/evm.sstore_cost/external_vm
 multi_vm/evm.sstore_cost_legacy/external_vm
 multi_vm/evm.sstore_cost_net_gas_metering/external_vm
 multi_vm/evm.sstore_out_of_block_gas/external_vm
-multi_vm/evm.sstore_pop_stack/external_vmmulti_vm/evm.blobhash_empty/external_vm
+multi_vm/evm.sstore_pop_stack/external_vm
+multi_vm/evm.blobhash_empty/external_vm
 multi_vm/evm.blobhash_invalid_hash_version/external_vm
 multi_vm/evm.blobhash_one/external_vm
 multi_vm/evm.blobhash_two/external_vm
