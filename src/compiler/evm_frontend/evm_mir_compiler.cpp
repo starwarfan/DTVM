@@ -1954,7 +1954,8 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleBaseFee() {
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleBlobHash(Operand Index) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  // Use max uint64_t value if the index is not 64-bit.
+  // Use max uint64_t value if the index is not 64-bit, because the blob hash
+  // won't trigger out-of-gas when the index is out of range.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
   normalizeOperandU64(Index, &Non64Value);
   return callRuntimeFor<const uint8_t *, uint64_t>(RuntimeFunctions.GetBlobHash,
@@ -2730,7 +2731,7 @@ EVMMirBuilder::convertCallResult(MInstruction *CallInstr) {
   return Operand();
 }
 
-void EVMMirBuilder::normalizeOperandU64(Operand &Param, uint64_t* Value) {
+void EVMMirBuilder::normalizeOperandU64(Operand &Param, uint64_t *Value) {
   if (Param.getType() != EVMType::UINT256) {
     return;
   }
@@ -2741,7 +2742,7 @@ void EVMMirBuilder::normalizeOperandU64(Operand &Param, uint64_t* Value) {
   }
 }
 
-void EVMMirBuilder::normalizeOperandU64Const(Operand &Param, uint64_t* Value) {
+void EVMMirBuilder::normalizeOperandU64Const(Operand &Param, uint64_t *Value) {
   const auto &C = Param.getConstValue();
   bool FitsU64 = (C[1] == 0 && C[2] == 0 && C[3] == 0);
 
@@ -2771,7 +2772,8 @@ void EVMMirBuilder::normalizeOperandU64Const(Operand &Param, uint64_t* Value) {
   Param = Operand(NewVal, EVMType::UINT256);
 }
 
-void EVMMirBuilder::normalizeOperandU64NonConst(Operand &Param, uint64_t* Value) {
+void EVMMirBuilder::normalizeOperandU64NonConst(Operand &Param,
+                                                uint64_t *Value) {
   // Extract four 64-bit parts [low, mid-low, mid-high, high]
   U256Inst Parts = extractU256Operand(Param);
 
@@ -2797,7 +2799,8 @@ void EVMMirBuilder::normalizeOperandU64NonConst(Operand &Param, uint64_t* Value)
       false, CmpInstruction::Predicate::ICMP_EQ, &Ctx.I64Type, IsU64, ZeroCond);
 
   if (Value != nullptr) {
-    // Use SelectInstruction to choose between Param's first part and provided Value
+    // Use SelectInstruction to choose between Param's first part and provided
+    // Value
     MInstruction *ValueInst = createIntConstInstruction(I64Type, *Value);
     MInstruction *SelectedLow = createInstruction<SelectInstruction>(
         false, I64Type, IsU64, Parts[0], ValueInst);
@@ -2806,9 +2809,11 @@ void EVMMirBuilder::normalizeOperandU64NonConst(Operand &Param, uint64_t* Value)
     U256Inst NewVal = {SelectedLow, Zero, Zero, Zero};
     Param = Operand(NewVal, EVMType::UINT256);
   } else {
-    MBasicBlock *TrapBB = getOrCreateExceptionSetBB(ErrorCode::GasLimitExceeded);
+    MBasicBlock *TrapBB =
+        getOrCreateExceptionSetBB(ErrorCode::GasLimitExceeded);
     MBasicBlock *ContinueBB = createBasicBlock();
-    createInstruction<BrIfInstruction>(true, Ctx, IsInvalid, TrapBB, ContinueBB);
+    createInstruction<BrIfInstruction>(true, Ctx, IsInvalid, TrapBB,
+                                       ContinueBB);
     addUniqueSuccessor(TrapBB);
     addSuccessor(ContinueBB);
     setInsertBlock(ContinueBB);
