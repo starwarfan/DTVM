@@ -230,58 +230,6 @@ void EVMMirBuilder::finalizeEVMBase() {
     CurFunc->deleteMBasicBlock(ReturnBB);
     ReturnBB = nullptr;
   }
-  if (!HasIndirectJump) {
-    // When there are no indirect jumps, we can safely remove unused dest
-    // Create a hashset to track usage of JumpDest basic blocks
-    std::unordered_set<MBasicBlock *> ToDelete;
-    ToDelete.reserve(JumpDestTable.size());
-    for (const auto &[PC, BB] : JumpDestTable) {
-      if (BB->predecessors().begin() == BB->predecessors().end()) {
-        ToDelete.insert(BB);
-      }
-    }
-    // Check if JumpDest BBs are used
-    for (auto It = CurFunc->begin(); It != CurFunc->end(); ++It) {
-      auto UsageIt = ToDelete.find(*It);
-      if (UsageIt != ToDelete.end()) {
-        ToDelete.erase(UsageIt);
-      }
-    }
-
-    // Recursively check for removed dependent successors
-    bool Changed = true;
-    while (Changed) {
-      Changed = false;
-      std::unordered_set<MBasicBlock *> NewToDelete;
-      for (auto *BB : ToDelete) {
-        for (auto *Successor : BB->successors()) {
-          if (ToDelete.count(Successor) == 0) {
-            // Check if all predecessors of this successor are being deleted
-            bool AllPredecessorsDeleted = true;
-            for (auto *Pred : Successor->predecessors()) {
-              if (ToDelete.count(Pred) == 0) {
-                AllPredecessorsDeleted = false;
-                break;
-              }
-            }
-
-            if (AllPredecessorsDeleted &&
-                std::distance(Successor->predecessors().begin(),
-                              Successor->predecessors().end()) > 0) {
-              NewToDelete.insert(Successor);
-              Changed = true;
-            }
-          }
-        }
-      }
-      ToDelete.insert(NewToDelete.begin(), NewToDelete.end());
-    }
-
-    // Delete all marked basic blocks
-    for (auto *BB : ToDelete) {
-      CurFunc->deleteMBasicBlock(BB);
-    }
-  }
 }
 
 LoadInstruction *EVMMirBuilder::getInstanceElement(MType *ValueType,
