@@ -623,6 +623,7 @@ void evmSetReturnDataCopy(zen::runtime::EVMInstance *Instance,
   // Additional checks for add overflow
   if (Offset > ReturnData.size() || Size > ReturnData.size() ||
       Offset + Size > ReturnData.size()) {
+    Instance->setGas(0);
     zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT(
         Instance, zen::common::ErrorCode::OutOfBoundsMemory);
   }
