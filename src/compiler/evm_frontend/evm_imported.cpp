@@ -118,7 +118,8 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .HandleUndefined = &evmHandleUndefined,
       .HandleSelfDestruct = &evmHandleSelfDestruct,
       .GetKeccak256 = &evmGetKeccak256,
-      .GetClz = &evmGetClz};
+      .GetClz = &evmGetClz,
+      .HandleFallback = &evmHandleFallback};
   return Table;
 }
 
@@ -1118,6 +1119,26 @@ const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
 
   return Cache.Keccak256Results.back().bytes;
 }
+void evmHandleFallback(zen::runtime::EVMInstance *Instance, uint64_t PC) {
+  // Phase 1 implementation: Basic fallback infrastructure
+  // This function establishes the runtime interface for JIT-to-interpreter
+  // fallback
+  //
+  // For Phase 1, we implement a basic fallback that indicates the fallback
+  // mechanism was triggered. The complete interpreter state restoration will be
+  // implemented in Phase 2 when the interpreter integration tasks are
+  // completed.
+  //
+  // The PC parameter represents the target program counter where interpreter
+  // execution should resume. This will be used in Phase 2 for state
+  // restoration.
+
+  // Set an execution error to indicate fallback was triggered
+  // This allows the JIT system to detect and handle the fallback condition
+  Instance->setExceptionByHostapi(
+      zen::common::Error(zen::common::ErrorCode::EVMInvalidInstruction));
+}
+
 const intx::uint256 *evmGetSLoad(zen::runtime::EVMInstance *Instance,
                                  const intx::uint256 &Index) {
   const zen::runtime::EVMModule *Module = Instance->getModule();
