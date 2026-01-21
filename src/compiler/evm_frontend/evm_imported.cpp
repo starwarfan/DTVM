@@ -4,6 +4,7 @@
 #include "compiler/evm_frontend/evm_imported.h"
 #include "common/errors.h"
 #include "evm/gas_storage_cost.h"
+#include "evm/interpreter.h"
 #include "host/evm/crypto.h"
 #include "runtime/evm_instance.h"
 #include "runtime/evm_module.h"
@@ -1120,23 +1121,32 @@ const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
   return Cache.Keccak256Results.back().bytes;
 }
 void evmHandleFallback(zen::runtime::EVMInstance *Instance, uint64_t PC) {
-  // Phase 1 implementation: Basic fallback infrastructure
-  // This function establishes the runtime interface for JIT-to-interpreter
-  // fallback
-  //
-  // For Phase 1, we implement a basic fallback that indicates the fallback
-  // mechanism was triggered. The complete interpreter state restoration will be
-  // implemented in Phase 2 when the interpreter integration tasks are
-  // completed.
-  //
-  // The PC parameter represents the target program counter where interpreter
-  // execution should resume. This will be used in Phase 2 for state
-  // restoration.
+  // Phase 3 implementation: Complete JIT-to-interpreter fallback
+  // This function handles the transition from JIT execution to interpreter
+  // execution when fallback is triggered.
 
-  // Set an execution error to indicate fallback was triggered
-  // This allows the JIT system to detect and handle the fallback condition
-  Instance->setExceptionByHostapi(
-      zen::common::Error(zen::common::ErrorCode::EVMInvalidInstruction));
+  try {
+    // Create execution context and interpreter instance
+    zen::evm::InterpreterExecContext fallbackContext(Instance);
+    zen::evm::BaseInterpreter interpreter(fallbackContext);
+
+    // Execute from the specified state
+    evmc::Result result = interpreter.executeFromState(Instance, PC);
+
+    // Store the execution result in the EVMInstance
+    Instance->setExeResult(std::move(result));
+
+    // Clear any previous errors since fallback execution completed successfully
+    Instance->clearError();
+
+  } catch (const zen::common::Error &error) {
+    // Handle interpreter execution errors
+    Instance->setExceptionByHostapi(error);
+  } catch (const std::exception &e) {
+    // Handle unexpected errors during fallback execution
+    Instance->setExceptionByHostapi(
+        zen::common::getError(zen::common::ErrorCode::EVMInvalidInstruction));
+  }
 }
 
 const intx::uint256 *evmGetSLoad(zen::runtime::EVMInstance *Instance,

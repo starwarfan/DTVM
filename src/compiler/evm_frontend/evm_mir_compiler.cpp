@@ -2492,6 +2492,14 @@ void EVMMirBuilder::fallbackToInterpreter(uint64_t targetPC) {
   // This will transfer control to the interpreter at the specified PC
   callRuntimeFor<void, uint64_t>(RuntimeFunctions.HandleFallback,
                                  Operand(PCConst, EVMType::UINT64));
+
+  createInstruction<BrInstruction>(true, Ctx, ReturnBB);
+  addSuccessor(ReturnBB);
+
+  if (ReturnBB->empty()) {
+    setInsertBlock(ReturnBB);
+    handleVoidReturn();
+  }
 }
 
 typename EVMMirBuilder::Operand
