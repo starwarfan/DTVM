@@ -105,6 +105,9 @@ public:
   }
   const evmc::Result &getExeResult() const { return ExeResult; }
   void setExeResult(evmc::Result Result) { ExeResult = std::move(Result); }
+
+  // Fallback support: restore execution state from EVMInstance
+  void restoreStateFromInstance(uint64_t startPC);
 };
 
 class BaseInterpreter {
@@ -115,6 +118,10 @@ public:
   using Byte = common::Byte;
   explicit BaseInterpreter(InterpreterExecContext &Ctx) : Context(Ctx) {}
   void interpret();
+
+  // Fallback support: execute from arbitrary EVM state
+  evmc::Result executeFromState(runtime::EVMInstance *instance,
+                                uint64_t startPC);
 };
 
 } // namespace evm
