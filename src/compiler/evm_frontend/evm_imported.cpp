@@ -644,11 +644,6 @@ void evmSetReturnDataCopy(zen::runtime::EVMInstance *Instance,
   uint64_t CopySize = std::min<uint64_t>(
       Size, static_cast<uint64_t>(ReturnData.size()) - Offset);
   std::memcpy(MemoryBase + DestOffset, ReturnData.data() + Offset, CopySize);
-
-  // Fill remaining bytes with zeros
-  if (Size > CopySize) {
-    std::memset(MemoryBase + DestOffset + CopySize, 0, Size - CopySize);
-  }
 }
 
 void evmExpandMemoryNoGas(zen::runtime::EVMInstance *Instance,
