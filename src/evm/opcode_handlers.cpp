@@ -611,6 +611,15 @@ void ReturnDataCopyHandler::doExecute() {
   intx::uint256 DestOffsetVal = Frame->pop();
   intx::uint256 OffsetVal = Frame->pop();
   intx::uint256 SizeVal = Frame->pop();
+
+  const auto &ReturnData = Context->getReturnData();
+  // EIP-211: RETURNDATACOPY reverts if offset + size > returndata.size()
+  if (OffsetVal > ReturnData.size() || SizeVal > ReturnData.size() ||
+      OffsetVal + SizeVal > ReturnData.size()) {
+    Context->setStatus(EVMC_INVALID_MEMORY_ACCESS);
+    return;
+  }
+
   // Ensure memory is large enough
   if (!checkMemoryExpandAndChargeGas(Frame, DestOffsetVal, SizeVal)) {
     Context->setStatus(EVMC_OUT_OF_GAS);
@@ -622,14 +631,6 @@ void ReturnDataCopyHandler::doExecute() {
   uint64_t Size = uint256ToUint64(SizeVal);
   if (copyCodeAndChargeGas(Frame, Size) == false) {
     Context->setStatus(EVMC_OUT_OF_GAS);
-    return;
-  }
-
-  const auto &ReturnData = Context->getReturnData();
-
-  // EIP-211: RETURNDATACOPY reverts if offset + size > returndata.size()
-  if (Offset > ReturnData.size() || Size > ReturnData.size() - Offset) {
-    Context->setStatus(EVMC_INVALID_MEMORY_ACCESS);
     return;
   }
 
