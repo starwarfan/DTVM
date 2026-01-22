@@ -322,10 +322,8 @@ void BaseInterpreter::interpret() {
   size_t CodeSize = Mod->CodeSize;
   Byte *Code = Mod->Code;
   evmc_revision Revision = Context.getInstance()->getRevision();
-  const auto *MetricsTable =
-      evmc_get_instruction_metrics_table(Revision);
-  const auto *NamesTable =
-      evmc_get_instruction_names_table(Revision);
+  const auto *MetricsTable = evmc_get_instruction_metrics_table(Revision);
+  const auto *NamesTable = evmc_get_instruction_names_table(Revision);
   const auto &Cache = Mod->getBytecodeCache();
   const uint8_t *__restrict JumpDestMap = Cache.JumpDestMap.data();
   const intx::uint256 *__restrict PushValueMap = Cache.PushValueMap.data();
