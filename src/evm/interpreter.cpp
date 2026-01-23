@@ -1345,18 +1345,17 @@ void InterpreterExecContext::restoreStateFromInstance(uint64_t StartPC) {
     const uint8_t *ElementData = EvmStackData + (I * ELEMENT_SIZE);
 
     // Convert from bytes to intx::uint256 using proper byte order
-    intx::uint256 Value = 0;
-    for (size_t J = 0; J < ELEMENT_SIZE; ++J) {
-      Value = (Value << 8) + ElementData[J];
+    intx::uint256 Value;
+    for (size_t J = 0; J < ELEMENT_SIZE / 8; J++) {
+      Value[J] = static_cast<uint64_t>(*ElementData);
+      ElementData += 8;
     }
-
     Frame->Stack[I] = Value;
   }
 
   // Ensure memory state consistency between JIT and interpreter
   // The EVMInstance maintains the authoritative memory state
   // Synchronize EVMFrame memory with EVMInstance memory
-
   uint8_t *InstanceMemory = Instance->getMemoryBase();
   uint64_t InstanceMemorySize = Instance->getMemorySize();
 
@@ -1385,8 +1384,10 @@ evmc::Result BaseInterpreter::executeFromState(runtime::EVMInstance *Instance,
   // Get the current message from the instance
   evmc_message *CurrentMsg = Instance->getCurrentMessage();
   ZEN_ASSERT(CurrentMsg);
-  // May sync message gas
+
+  // Allocate a frame without adding message
   FallbackContext.allocTopFrame(CurrentMsg);
+  Instance->popMessage();
 
   // Restore state from the instance
   FallbackContext.restoreStateFromInstance(StartPC);
