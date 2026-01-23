@@ -6,7 +6,7 @@
 The EVMMirBuilder SHALL provide a fallbackToInterpreter method to transition execution from JIT to interpreter mode.
 
 #### Scenario: Fallback method interface
-- **WHEN** EVMMirBuilder needs to fallback to interpreter
+- **WHEN** EVMMirBuilder detects undefined opcodes, stack overflow/underflow, out of gas, or FALLBACK opcode
 - **THEN** it SHALL call fallbackToInterpreter(uint64_t targetPC)
 - **AND** the method SHALL generate MIR instructions to save current execution state
 - **AND** it SHALL call the runtime fallback function via callRuntimeFor

@@ -12,9 +12,10 @@ The system SHALL support seamless transitions between JIT and interpreter execut
 - **AND** execution results SHALL be identical to single-mode execution
 
 #### Scenario: Fallback trigger conditions
-- **WHEN** JIT encounters unsupported opcodes
-- **OR** complex control flow exceeds JIT capabilities  
-- **OR** runtime conditions require interpreter flexibility
+- **WHEN** JIT execution block encounters undefined opcodes
+- **OR** stack overflow/underflow conditions occur
+- **OR** out of gas conditions are detected
+- **OR** FALLBACK opcode is encountered during testing
 - **THEN** the system SHALL trigger fallback to interpreter
 - **AND** the fallback SHALL be transparent to the calling context
 

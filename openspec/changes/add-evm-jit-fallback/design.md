@@ -26,9 +26,10 @@ The following state must be preserved during fallback:
 // In EVMMirBuilder
 void fallbackToInterpreter(uint64_t targetPC) {
   // 1. Save current PC
-  // 2. Flush stack state to EVMInstance
-  // 3. Sync memory state 
-  // 4. Call runtime fallback function
+  // 2. Sync gas
+  // 3. Flush stack state to EVMInstance
+  // 4. Sync memory state 
+  // 5. Call runtime fallback function
   callRuntimeFor(RuntimeFunctions.HandleFallback, targetPC);
 }
 ```
@@ -82,17 +83,31 @@ class EVMInterpreter {
 - Handle gas accounting across transition
 
 ### Phase 3: Integration & Testing
-- Add fallback triggers for unsupported opcodes
-- Implement comprehensive test coverage
-- Performance optimization and validation
+- Add fallback triggers for unsupported opcodes when block begins
+- Use an undefined opcode to trigger fallback when testing macro defined
+- Write unit tests for fallback mechanism
 
 ## Error Handling
 
 ### Fallback Triggers
-- Unsupported opcodes in current JIT implementation
-- Complex control flow that exceeds JIT capabilities
-- Runtime conditions requiring interpreter flexibility
-- Explicit fallback requests for debugging/testing
+
+The fallback mechanism will be triggered when the next JIT execution block has more than one of the following exceptions:
+
+#### 1. Undefined Opcodes
+- **Invalid instructions**: When encountering opcodes that are not defined in the current EVM revision
+- **Unimplemented opcodes**: Instructions that exist in the specification but are not yet implemented in the JIT compiler
+
+#### 2. Stack Overflow/Underflow
+- **Stack overflow**: When stack operations would exceed the maximum stack size (1024 elements)
+- **Stack underflow**: When attempting to pop from an empty stack or access stack elements that don't exist
+
+#### 3. Out of Gas
+- **Insufficient gas**: When remaining gas is not sufficient to complete the current operation
+- **Gas limit exceeded**: When the total gas consumption would exceed the transaction gas limit
+
+#### 4. Testing Triggers (Test Only)
+- **FALLBACK opcode**: A specific undefined opcode designated as FALLBACK to trigger fallback mechanism during testing
+- **Debug mode**: When testing macros are defined to force fallback for validation purposes
 
 ### Error Conditions
 - Invalid PC values (must point to valid instruction boundary)
