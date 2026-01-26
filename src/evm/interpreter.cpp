@@ -1373,29 +1373,3 @@ void InterpreterExecContext::restoreStateFromInstance(uint64_t StartPC) {
   // Reset execution status
   setStatus(EVMC_SUCCESS);
 }
-
-evmc::Result BaseInterpreter::executeFromState(runtime::EVMInstance *Instance,
-                                               uint64_t StartPC) {
-  // Execute interpreter from arbitrary EVM state (fallback support)
-
-  // Create a new execution context with the provided instance
-  InterpreterExecContext FallbackContext(Instance);
-
-  // Get the current message from the instance
-  evmc_message *CurrentMsg = Instance->getCurrentMessage();
-  ZEN_ASSERT(CurrentMsg);
-
-  // Allocate a frame without adding message
-  FallbackContext.allocTopFrame(CurrentMsg);
-  Instance->popMessage();
-
-  // Restore state from the instance
-  FallbackContext.restoreStateFromInstance(StartPC);
-
-  // Create interpreter and execute
-  BaseInterpreter FallbackInterpreter(FallbackContext);
-  FallbackInterpreter.interpret();
-
-  // Return the execution result
-  return std::move(const_cast<evmc::Result &>(FallbackContext.getExeResult()));
-}

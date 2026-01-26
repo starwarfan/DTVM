@@ -1126,15 +1126,35 @@ void evmHandleFallback(zen::runtime::EVMInstance *Instance, uint64_t PC) {
   // execution when fallback is triggered.
 
   try {
-    // Create execution context and interpreter instance
-    zen::evm::InterpreterExecContext fallbackContext(Instance);
-    zen::evm::BaseInterpreter interpreter(fallbackContext);
+    // Create execution context
+    zen::evm::InterpreterExecContext FallbackContext(Instance);
+    evmc_message *CurrentMsg = Instance->getCurrentMessage();
+    ZEN_ASSERT(CurrentMsg);
+
+    // Allocate a frame without pushing message
+    FallbackContext.allocTopFrame(CurrentMsg);
+    Instance->popMessage();
+
+    // Restore state from the instance
+    FallbackContext.restoreStateFromInstance(PC);
+
+    // Create interpreter and execute
+    zen::evm::BaseInterpreter FallbackInterpreter(FallbackContext);
+    FallbackInterpreter.interpret();
 
     // Execute from the specified state
-    evmc::Result result = interpreter.executeFromState(Instance, PC);
+    const evmc::Result &Result = FallbackContext.getExeResult();
+    // Copy execute result from interpreter context to instance
+    if (Result.output_size > 0) {
+      Instance->setReturnData(std::vector<uint8_t>(
+          Result.output_data, Result.output_data + Result.output_size));
+    }
+    evmc::Result InstResult(Result.status_code, Result.gas_left,
+                            Result.gas_refund, Instance->getReturnData().data(),
+                            Instance->getReturnData().size());
 
     // Store the execution result in the EVMInstance
-    Instance->setExeResult(std::move(result));
+    Instance->setExeResult(std::move(InstResult));
 
     // Clear any previous errors since fallback execution completed successfully
     Instance->clearError();

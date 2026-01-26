@@ -118,10 +118,6 @@ public:
   using Byte = common::Byte;
   explicit BaseInterpreter(InterpreterExecContext &Ctx) : Context(Ctx) {}
   void interpret();
-
-  // Fallback support: execute from arbitrary EVM state
-  evmc::Result executeFromState(runtime::EVMInstance *instance,
-                                uint64_t startPC);
 };
 
 } // namespace evm
