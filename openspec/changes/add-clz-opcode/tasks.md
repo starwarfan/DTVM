@@ -8,11 +8,12 @@
 **Validation**: Run existing CLZ unit tests (`src/unittests/evm_eip7939_clz_test.cpp`) in interpreter mode
 
 ## 2. JIT Implementation
-- [ ] 2.1 Add CLZ runtime function declaration in `src/compiler/evm_frontend/evm_imported.h`
-- [ ] 2.2 Add CLZ runtime function implementation in `src/compiler/evm_frontend/evm_imported.cpp` using `intx::clz`
-- [ ] 2.3 Add CLZ case in `src/action/evm_bytecode_visitor.h` switch statement
-- [ ] 2.4 Add `handleClz` method declaration in `src/compiler/evm_frontend/evm_mir_compiler.h`
-- [ ] 2.5 Add `handleClz` method implementation in `src/compiler/evm_frontend/evm_mir_compiler.cpp` using `callRuntime`
+- [x] 2.1 Add CLZ runtime function declaration in `src/compiler/evm_frontend/evm_imported.h`
+- [x] 2.2 Add CLZ runtime function implementation in `src/compiler/evm_frontend/evm_imported.cpp` using `intx::clz`
+- [x] 2.3 Add CLZ case in `src/action/evm_bytecode_visitor.h` switch statement
+- [x] 2.4 Add `handleClz` method declaration in `src/compiler/evm_frontend/evm_mir_compiler.h`
+- [x] 2.5 Add `handleClz` method implementation in `src/compiler/evm_frontend/evm_mir_compiler.cpp` using `callRuntime`
+- [x] 2.6 Add CLZ stack height update in `src/compiler/evm_frontend/evm_analyzer.h`
 
 **Validation**: Run existing CLZ unit tests in JIT mode
 
@@ -23,9 +24,15 @@
 
 **Validation**: Run easm tests with Osaka revision
 
-## 4. Integration Verification
-- [ ] 4.1 Verify revision-based opcode availability (undefined before Osaka)
-- [ ] 4.2 Run full EVM test suite to ensure no regressions
+## 4. CLI EVM Revision Support
+- [x] 4.1 Add `--evm-revision` CLI option in `src/cli/dtvm.cpp`
+- [x] 4.2 Pass revision to `loadEVMModule` when specified
+
+**Validation**: Run `dtvm --format evm --evm-revision osaka <bytecode>` to test CLZ opcode
+
+## 5. Integration Verification
+- [ ] 5.1 Verify revision-based opcode availability (undefined before Osaka)
+- [ ] 5.2 Run full EVM test suite to ensure no regressions
 
 **Validation**: All EVM spec tests pass
 
