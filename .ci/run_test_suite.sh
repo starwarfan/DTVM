@@ -34,7 +34,7 @@ if [ ${ENABLE_ASAN} = true ]; then
     CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_ASAN=ON"
 fi
 
-EXTRA_EXE_OPTIONS="-m $RUN_MODE --format $INPUT_FORMAT --evm-revision osaka"
+EXTRA_EXE_OPTIONS="-m $RUN_MODE --format $INPUT_FORMAT "
 
 echo "testing in run mode: $RUN_MODE"
 
@@ -100,6 +100,8 @@ CMAKE_OPTIONS_ORIGIN="$CMAKE_OPTIONS"
 if [[ ${INPUT_FORMAT} == "evm" ]]; then
     ./tools/easm2bytecode.sh ./tests/evm_asm ./tests/evm_asm
     ./tools/solc_batch_compile.sh
+    # Use revision osaka
+    EXTRA_EXE_OPTIONS="$EXTRA_EXE_OPTIONS --evm-revision osaka"
 fi
 
 for STACK_TYPE in ${STACK_TYPES[@]}; do

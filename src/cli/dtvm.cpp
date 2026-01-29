@@ -180,7 +180,9 @@ int main(int argc, char *argv[]) {
   bool DeployMode = false;
   std::string ContractAddress;
   std::string SenderAddress = "1000000000000000000000000000000000000000";
+#ifdef ZEN_ENABLE_EVM
   evmc_revision EvmRevision = zen::evm::DEFAULT_REVISION;
+#endif
 
   const std::unordered_map<std::string, InputFormat> FormatMap = {
       {"wasm", InputFormat::WASM},
