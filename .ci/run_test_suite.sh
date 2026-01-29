@@ -34,7 +34,7 @@ if [ ${ENABLE_ASAN} = true ]; then
     CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_ASAN=ON"
 fi
 
-EXTRA_EXE_OPTIONS="-m $RUN_MODE --format $INPUT_FORMAT"
+EXTRA_EXE_OPTIONS="-m $RUN_MODE --format $INPUT_FORMAT --evm-revision osaka"
 
 echo "testing in run mode: $RUN_MODE"
 
