@@ -156,7 +156,7 @@ class TestRunner:
             self.runtime_path,
             "--format", self.args.format,
             "-m", self.args.mode,
-            "--evmc-revision", "osaka"
+            "--evm-revision", "osaka"
         ]
 
         if self.args.enable_multipass_lazy:
