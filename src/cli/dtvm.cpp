@@ -277,14 +277,15 @@ int main(int argc, char *argv[]) {
 #ifdef ZEN_ENABLE_EVM
     CLIParser->add_flag("--enable-evm-gas", Config.EnableEvmGasMetering,
                         "Enable EVM gas metering when compiling EVM bytecode");
+#endif // ZEN_ENABLE_EVM
+#endif // ZEN_ENABLE_MULTIPASS_JIT
+#ifdef ZEN_ENABLE_EVM
     CLIParser->add_option("--calldata", Calldata, "Calldata hex pass to EVM");
     CLIParser
         ->add_option("--evm-revision", EvmRevision,
                      "EVM revision (e.g., cancun, osaka)")
         ->transform(CLI::CheckedTransformer(EvmRevisionMap, CLI::ignore_case));
 #endif // ZEN_ENABLE_EVM
-#endif // ZEN_ENABLE_MULTIPASS_JIT
-
     CLI11_PARSE(*CLIParser, argc, argv);
   } catch (const std::exception &E) {
     printf("failed to parse command line arguments: %s\n", E.what());
