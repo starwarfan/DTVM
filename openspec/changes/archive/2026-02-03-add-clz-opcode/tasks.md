@@ -31,8 +31,8 @@
 **Validation**: Run `dtvm --format evm --evm-revision osaka <bytecode>` to test CLZ opcode
 
 ## 5. Integration Verification
-- [ ] 5.1 Verify revision-based opcode availability (undefined before Osaka)
-- [ ] 5.2 Run full EVM test suite to ensure no regressions
+- [x] 5.1 Verify revision-based opcode availability (undefined before Osaka)
+- [x] 5.2 Run full EVM test suite to ensure no regressions
 
 **Validation**: All EVM spec tests pass
 
