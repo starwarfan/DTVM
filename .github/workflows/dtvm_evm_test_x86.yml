@@ -201,3 +201,109 @@ jobs:
           export ENABLE_GAS_METER=true
 
           bash .ci/run_test_suite.sh
+
+  performance_regression_check:
+    name: Performance Regression Check (10% threshold)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    container:
+      image: dtvmdev1/dtvm-dev-x64:main
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+        with:
+          submodules: "true"
+          fetch-depth: 0
+
+      - name: Code Format Check
+        run: |
+          ./tools/format.sh check
+
+      - name: Build baseline (${{ github.base_ref }})
+        run: |
+          echo "Building baseline on branch: ${{ github.base_ref }}"
+          export LLVM_SYS_150_PREFIX=/opt/llvm15
+          export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
+          export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
+
+          # Save current state
+          git stash
+          git checkout ${{ github.base_ref }}
+
+          # Build baseline
+          export CMAKE_BUILD_TARGET=Release
+          export ENABLE_ASAN=false
+          export RUN_MODE=multipass
+          export ENABLE_LAZY=false
+          export ENABLE_MULTITHREAD=true
+          export TestSuite=benchmarksuite
+          export CPU_EXCEPTION_TYPE='cpu'
+          export BENCHMARK_MODE=multipass
+          export BENCHMARK_SAVE_BASELINE=/tmp/perf_baseline.json
+
+          bash .ci/run_test_suite.sh
+
+      - name: Build current PR and check regression
+        id: perf-check
+        run: |
+          echo "Building PR branch: ${{ github.sha }}"
+          export LLVM_SYS_150_PREFIX=/opt/llvm15
+          export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
+          export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
+
+          # Switch back to PR branch
+          git checkout ${{ github.sha }}
+          git stash pop || true
+
+          # Clean and rebuild for current PR
+          rm -rf build evmone
+
+          # Build and check
+          export CMAKE_BUILD_TARGET=Release
+          export ENABLE_ASAN=false
+          export RUN_MODE=multipass
+          export ENABLE_LAZY=false
+          export ENABLE_MULTITHREAD=true
+          export TestSuite=benchmarksuite
+          export CPU_EXCEPTION_TYPE='cpu'
+          export BENCHMARK_MODE=multipass
+          export BENCHMARK_THRESHOLD=0.10
+          export BENCHMARK_BASELINE_FILE=/tmp/perf_baseline.json
+
+          set +e
+          bash .ci/run_test_suite.sh
+          EXIT_CODE=$?
+          set -e
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $EXIT_CODE
+        continue-on-error: true
+
+      - name: Comment on PR (Success)
+        if: steps.perf-check.outputs.exit_code == '0'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Performance Check Passed**\n\nNo significant performance regression detected (< 10% threshold).'
+            })
+
+      - name: Comment on PR (Regression)
+        if: steps.perf-check.outputs.exit_code == '1'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **Performance Regression Detected**\n\nSome benchmarks show >10% performance degradation compared to `${{ github.base_ref }}`. Please check the workflow logs for details.'
+            })
+
+      - name: Fail on regression
+        if: steps.perf-check.outputs.exit_code == '1'
+        run: |
+          echo "::error::Performance regression detected. See logs for details."
+          exit 1
