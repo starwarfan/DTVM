@@ -187,7 +187,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             cd $EVMONE_DIR
 
             # Copy check_performance_regression.py from DTVM repo
-            cp ../tools/check_performance_regression.py scripts/
+            cp ../tools/check_performance_regression.py ./
 
             # Build evmone if not already built
             if [ ! -f "build/bin/evmone-bench" ]; then
@@ -198,14 +198,14 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             # Run performance check based on mode
             if [ -n "$BENCHMARK_SAVE_BASELINE" ]; then
                 echo "Saving performance baseline..."
-                python3 scripts/check_performance_regression.py \
+                python3 check_performance_regression.py \
                     --save-baseline "$BENCHMARK_SAVE_BASELINE" \
                     --lib ./libdtvmapi.so \
                     --mode "$BENCHMARK_MODE" \
                     --benchmark-dir test/evm-benchmarks/benchmarks
             elif [ -n "$BENCHMARK_BASELINE_FILE" ]; then
                 echo "Checking performance regression against baseline..."
-                python3 scripts/check_performance_regression.py \
+                python3 check_performance_regression.py \
                     --baseline "$BENCHMARK_BASELINE_FILE" \
                     --threshold "$BENCHMARK_THRESHOLD" \
                     --lib ./libdtvmapi.so \
@@ -213,7 +213,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                     --benchmark-dir test/evm-benchmarks/benchmarks
             else
                 echo "Running benchmark suite without comparison..."
-                python3 scripts/check_performance_regression.py \
+                python3 check_performance_regression.py \
                     --save-baseline benchmark_results.json \
                     --lib ./libdtvmapi.so \
                     --mode "$BENCHMARK_MODE" \

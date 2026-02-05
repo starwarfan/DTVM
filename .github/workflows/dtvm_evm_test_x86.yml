@@ -206,6 +206,9 @@ jobs:
     name: Performance Regression Check (10% threshold)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     container:
       image: dtvmdev1/dtvm-dev-x64:main
     steps:
@@ -215,6 +218,11 @@ jobs:
           submodules: "true"
           fetch-depth: 0
 
+      - name: Setup git safe directory
+        run: |
+          echo "Configuring git safe directory: ${{ github.workspace }}"
+          git config --global --add safe.directory /__w/DTVM/DTVM
+
       - name: Code Format Check
         run: |
           ./tools/format.sh check
@@ -222,12 +230,13 @@ jobs:
       - name: Build baseline (${{ github.base_ref }})
         run: |
           echo "Building baseline on branch: ${{ github.base_ref }}"
+
           export LLVM_SYS_150_PREFIX=/opt/llvm15
           export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
           export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
 
-          # Save current state
-          git stash
+          # Save current state (including untracked files)
+          git stash push -u -m "perf-check-stash"
           git checkout ${{ github.base_ref }}
 
           # Build baseline
@@ -247,6 +256,7 @@ jobs:
         id: perf-check
         run: |
           echo "Building PR branch: ${{ github.sha }}"
+
           export LLVM_SYS_150_PREFIX=/opt/llvm15
           export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
           export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
