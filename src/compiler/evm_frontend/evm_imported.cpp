@@ -374,15 +374,12 @@ const uint8_t *evmGetBlockHash(zen::runtime::EVMInstance *Instance,
   const auto LowerBound = std::max(UpperBound - 256, decltype(UpperBound){0});
 
   auto &Cache = Instance->getMessageCache();
-  auto It = Cache.BlockHashes.find(BlockNumber);
-  if (It == Cache.BlockHashes.end()) {
-    evmc::bytes32 Hash = (BlockNumber < UpperBound && BlockNumber >= LowerBound)
+  evmc::bytes32 Hash = (BlockNumber < UpperBound && BlockNumber >= LowerBound)
                              ? Module->Host->get_block_hash(BlockNumber)
                              : evmc::bytes32{};
-    Cache.BlockHashes[BlockNumber] = Hash;
-    return Cache.BlockHashes[BlockNumber].bytes;
-  }
-  return It->second.bytes;
+  // Use same slot for all block hashes
+  Cache.BlockHashes[0] = Hash;
+  return Cache.BlockHashes[0].bytes;
 }
 
 const uint8_t *evmGetCoinBase(zen::runtime::EVMInstance *Instance) {
