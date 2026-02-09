@@ -24,6 +24,80 @@ using namespace zen::common;
 // JIT compilation limits (95% < 10KB)
 const size_t MAX_JIT_BYTECODE_SIZE = 0x6000;
 
+// Maximum estimated MIR instruction count for JIT compilation.
+// Some EVM opcodes (e.g. MUL) expand to many MIR instructions (~80 per
+// opcode), which can cause register allocation to take extremely long on
+// large basic blocks. This threshold triggers an interpreter fallback
+// before compilation even starts.
+const size_t MAX_JIT_MIR_ESTIMATE = 50000;
+
+// Approximate MIR instruction count generated per EVM opcode.
+// Derived from the compiler frontend: inline arithmetic expands to many
+// instructions while runtime-call opcodes are cheap.
+// clang-format off
+static constexpr uint32_t MIR_OPCODE_WEIGHT[256] = {
+  // 0x00 STOP    ADD     MUL     SUB     DIV     SDIV    MOD     SMOD
+         5,       12,     80,     20,     5,      5,      5,      5,
+  // 0x08 ADDMOD  MULMOD  EXP     SIGNEXT (0x0c-0x0f undefined)
+         5,       5,      5,      20,     2,      2,      2,      2,
+  // 0x10 LT      GT      SLT     SGT     EQ      ISZERO  AND     OR
+         12,      12,     12,     12,     12,     8,      8,      8,
+  // 0x18 XOR     NOT     BYTE    SHL     SHR     SAR     CLZ     (0x1f)
+         8,       8,      8,      15,     15,     15,     8,      2,
+  // 0x20 KECCAK256  (0x21-0x2f undefined)
+         5,       2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,
+  // 0x30 ADDRESS BALANCE ORIGIN  CALLER  CALLVAL CLDLOAD CLDSIZE CLDCOPY
+         5,       5,      5,      5,      5,      5,      5,      8,
+  // 0x38 CODESIZE CODECOPY GASPRICE EXTCDSZ EXTCDCP RETDSZ  RETDCP  EXTCDHASH
+         5,       8,       5,       5,       8,      5,      8,      5,
+  // 0x40 BLKHASH COINBASE TIMESTAMP NUMBER PREVRAND GASLIM CHAINID SELFBAL
+         5,       5,       5,        5,     5,       5,     5,      5,
+  // 0x48 BASEFEE BLOBHASH BLOBBASE (0x4b-0x4f undefined)
+         5,       5,       5,       2,      2,      2,      2,      2,
+  // 0x50 POP     MLOAD   MSTORE  MSTORE8 SLOAD   SSTORE  JUMP    JUMPI
+         2,       8,      8,      8,      5,      5,      5,      5,
+  // 0x58 PC      MSIZE   GAS     JMPDEST TLOAD   TSTORE  MCOPY   (PUSH0)
+         5,       5,      5,      2,      5,      5,      8,      4,
+  // 0x60 PUSH1 .. PUSH32 (0x60-0x7f): all weight 4
+         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,  // PUSH1-PUSH16
+         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,  // PUSH17-PUSH32
+  // 0x80 DUP1 .. DUP16 (0x80-0x8f): all weight 4
+         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+  // 0x90 SWAP1 .. SWAP16 (0x90-0x9f): all weight 4
+         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+  // 0xa0 LOG0-LOG4 (0xa0-0xa4), rest undefined
+         8, 8, 8, 8, 8,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+  // 0xb0-0xef: undefined / reserved, weight 2
+         2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  // 0xb0-0xbf
+         2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  // 0xc0-0xcf
+         2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  // 0xd0-0xdf
+         2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  // 0xe0-0xef
+  // 0xf0 CREATE  CALL    CALLCODE RETURN  DELCALL (0xf5) CREAT2  (0xf7)
+         5,       5,      5,       5,      5,      2,     5,      2,
+  // 0xf8 (undef) (undef) STATIC   (undef) (undef) REVERT (INVALID) SELFDEST
+         2,       2,      5,       2,      2,      5,     2,       5,
+};
+// clang-format on
+
+/// Estimate the total MIR instruction count for an EVM bytecode sequence.
+/// This is a fast O(n) scan that uses per-opcode weights -- no actual MIR
+/// generation is performed.
+size_t estimateMirInstructionCount(const uint8_t *Code, size_t CodeSize) {
+  size_t Estimate = 0;
+  size_t I = 0;
+  while (I < CodeSize) {
+    uint8_t Op = Code[I];
+    Estimate += MIR_OPCODE_WEIGHT[Op];
+    // Skip over PUSH immediate data bytes (PUSH1=0x60 .. PUSH32=0x7f)
+    if (Op >= 0x60 && Op <= 0x7f) {
+      I += static_cast<size_t>(Op - 0x5f); // 1 + N immediate bytes
+    } else {
+      I += 1;
+    }
+  }
+  return Estimate;
+}
+
 // RAII helper for temporarily changing runtime configuration
 class ScopedConfig {
 public:
@@ -147,10 +221,13 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
       return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
     }
   }
-  // Use interpreter mode for large bytecode
+  // Use interpreter mode for bytecode that would be too expensive to JIT:
+  // either the raw bytecode is very large, or opcodes like MUL would expand
+  // to so many MIR instructions that register allocation becomes impractical.
   std::unique_ptr<ScopedConfig> TempConfig;
   if (VM->Config.Mode == RunMode::MultipassMode &&
-      CodeSize > MAX_JIT_BYTECODE_SIZE) {
+      (CodeSize > MAX_JIT_BYTECODE_SIZE ||
+       estimateMirInstructionCount(Code, CodeSize) > MAX_JIT_MIR_ESTIMATE)) {
     RuntimeConfig NewConfig = VM->Config;
     NewConfig.Mode = RunMode::InterpMode;
     TempConfig = std::make_unique<ScopedConfig>(VM->RT.get(), NewConfig);
