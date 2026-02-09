@@ -20,8 +20,10 @@ Exit codes:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -40,14 +42,26 @@ def run_benchmark(
     benchmark_dir: str,
     extra_args: Optional[List[str]] = None,
 ) -> List[BenchmarkResult]:
-    """Run benchmark and parse JSON output."""
+    """Run benchmark and parse JSON output.
+
+    Uses --benchmark_out to write JSON results to a temporary file so that
+    the human-readable benchmark progress streams to stdout/stderr in real
+    time (important for CI visibility).
+    """
     env = {"EVMONE_EXTERNAL_OPTIONS": f"{lib_path},mode={mode}"}
+
+    # Write JSON results to a temp file instead of capturing stdout.
+    # This lets Google Benchmark's normal console output (one line per
+    # completed case) stream directly to the CI log in real time.
+    fd, json_out_path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
 
     cmd = [
         "./build/bin/evmone-bench",
         benchmark_dir,
         "--benchmark_filter=external/*",
-        "--benchmark_format=json",
+        f"--benchmark_out={json_out_path}",
+        "--benchmark_out_format=json",
     ]
 
     if extra_args:
@@ -55,20 +69,33 @@ def run_benchmark(
 
     print(f"Running: {' '.join(cmd)}")
     print(f"Environment: EVMONE_EXTERNAL_OPTIONS={env['EVMONE_EXTERNAL_OPTIONS']}")
+    sys.stdout.flush()
 
     result = subprocess.run(
         cmd,
-        capture_output=True,
-        text=True,
         env={**subprocess.os.environ, **env},
     )
 
     if result.returncode != 0:
         print(f"Benchmark execution failed with code {result.returncode}")
-        print(f"stderr: {result.stderr}")
+        # Clean up temp file on failure
+        try:
+            os.unlink(json_out_path)
+        except OSError:
+            pass
         sys.exit(2)
 
-    return parse_benchmark_json(result.stdout)
+    # Read JSON results from the temp file
+    try:
+        with open(json_out_path, "r") as f:
+            json_data = f.read()
+    finally:
+        try:
+            os.unlink(json_out_path)
+        except OSError:
+            pass
+
+    return parse_benchmark_json(json_data)
 
 
 def parse_benchmark_json(json_output: str) -> List[BenchmarkResult]:

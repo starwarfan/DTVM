@@ -247,7 +247,7 @@ jobs:
           export ENABLE_MULTITHREAD=true
           export TestSuite=benchmarksuite
           export CPU_EXCEPTION_TYPE='cpu'
-          export BENCHMARK_MODE=multipass
+          export BENCHMARK_MODE=interpreter
           export BENCHMARK_SAVE_BASELINE=/tmp/perf_baseline.json
 
           bash .ci/run_test_suite.sh
@@ -276,7 +276,7 @@ jobs:
           export ENABLE_MULTITHREAD=true
           export TestSuite=benchmarksuite
           export CPU_EXCEPTION_TYPE='cpu'
-          export BENCHMARK_MODE=multipass
+          export BENCHMARK_MODE=interpreter
           export BENCHMARK_THRESHOLD=0.10
           export BENCHMARK_BASELINE_FILE=/tmp/perf_baseline.json
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary.md
