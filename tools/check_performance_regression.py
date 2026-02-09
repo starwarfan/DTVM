@@ -232,6 +232,79 @@ def print_comparison_table(comparisons: List[dict], threshold: float) -> None:
     print(f"Regressions (> {threshold*100:.0f}%): {regression_count}")
 
 
+def _short_name(name: str) -> str:
+    """Extract a short display name from the full benchmark name.
+
+    Benchmark names typically look like 'external/some_case/variant'.
+    We strip the leading 'external/' prefix to keep the table compact.
+    """
+    if name.startswith("external/"):
+        return name[len("external/"):]
+    return name
+
+
+def generate_markdown_summary(
+    comparisons: List[dict],
+    threshold: float,
+    has_regression: bool,
+) -> str:
+    """Generate a concise Markdown summary of benchmark comparison results."""
+    lines: List[str] = []
+
+    regression_count = sum(1 for c in comparisons if c["is_regression"])
+
+    lines.append(
+        f"**Performance Benchmark Results** (threshold: {threshold*100:.0f}%)"
+    )
+    lines.append("")
+
+    if not comparisons:
+        lines.append("_No benchmarks to compare._")
+        return "\n".join(lines)
+
+    # Markdown table header
+    lines.append("| Benchmark | Baseline (us) | Current (us) | Change | Status |")
+    lines.append("|-----------|--------------|-------------|--------|--------|")
+
+    for comp in comparisons:
+        name = _short_name(comp["name"])
+        baseline_us = comp["baseline_time_ns"] / 1000
+        current_us = comp["current_time_ns"] / 1000
+        change_pct = comp["max_change"] * 100
+        status = "PASS" if not comp["is_regression"] else "**REGRESSED**"
+
+        lines.append(
+            f"| {name} | {baseline_us:.2f} | {current_us:.2f} "
+            f"| {change_pct:+.1f}% | {status} |"
+        )
+
+    lines.append("")
+    lines.append(
+        f"**Summary**: {len(comparisons)} benchmarks, "
+        f"{regression_count} regressions"
+    )
+
+    return "\n".join(lines)
+
+
+def generate_baseline_summary(results: List[BenchmarkResult]) -> str:
+    """Generate a concise Markdown summary for a baseline-save run."""
+    lines: List[str] = []
+    lines.append("**Baseline Benchmark Results**")
+    lines.append("")
+    lines.append("| Benchmark | Time (us) |")
+    lines.append("|-----------|----------|")
+
+    for r in results:
+        name = _short_name(r.name)
+        time_us = r.time_ns / 1000
+        lines.append(f"| {name} | {time_us:.2f} |")
+
+    lines.append("")
+    lines.append(f"**Total**: {len(results)} benchmarks collected")
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Check for performance regressions in evmone benchmarks",
@@ -284,6 +357,11 @@ Examples:
         help="Path to benchmark directory (default: test/evm-benchmarks/benchmarks)",
     )
     parser.add_argument(
+        "--output-summary",
+        metavar="PATH",
+        help="Write a concise Markdown summary to the given file (for PR comments)",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -315,6 +393,11 @@ Examples:
     # Save baseline mode
     if args.save_baseline:
         save_baseline(current_results, args.save_baseline)
+        if args.output_summary:
+            summary_md = generate_baseline_summary(current_results)
+            with open(args.output_summary, "w") as f:
+                f.write(summary_md)
+            print(f"Wrote baseline summary to {args.output_summary}")
         return 0
 
     # Compare mode
@@ -328,6 +411,15 @@ Examples:
     )
 
     print_comparison_table(comparisons, args.threshold)
+
+    # Write Markdown summary for PR comments
+    if args.output_summary:
+        summary_md = generate_markdown_summary(
+            comparisons, args.threshold, has_regression
+        )
+        with open(args.output_summary, "w") as f:
+            f.write(summary_md)
+        print(f"Wrote comparison summary to {args.output_summary}")
 
     # Summary for GitHub Actions
     print("\n" + "=" * 100)

@@ -195,11 +195,15 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 cmake --build build --parallel -j 16
             fi
 
+            # Default summary output path (can be overridden via env)
+            BENCHMARK_SUMMARY_FILE=${BENCHMARK_SUMMARY_FILE:-/tmp/perf_summary.md}
+
             # Run performance check based on mode
             if [ -n "$BENCHMARK_SAVE_BASELINE" ]; then
                 echo "Saving performance baseline..."
                 python3 check_performance_regression.py \
                     --save-baseline "$BENCHMARK_SAVE_BASELINE" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
                     --lib ./libdtvmapi.so \
                     --mode "$BENCHMARK_MODE" \
                     --benchmark-dir test/evm-benchmarks/benchmarks
@@ -208,6 +212,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 python3 check_performance_regression.py \
                     --baseline "$BENCHMARK_BASELINE_FILE" \
                     --threshold "$BENCHMARK_THRESHOLD" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
                     --lib ./libdtvmapi.so \
                     --mode "$BENCHMARK_MODE" \
                     --benchmark-dir test/evm-benchmarks/benchmarks
@@ -215,6 +220,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 echo "Running benchmark suite without comparison..."
                 python3 check_performance_regression.py \
                     --save-baseline benchmark_results.json \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
                     --lib ./libdtvmapi.so \
                     --mode "$BENCHMARK_MODE" \
                     --benchmark-dir test/evm-benchmarks/benchmarks

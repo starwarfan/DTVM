@@ -279,41 +279,38 @@ jobs:
           export BENCHMARK_MODE=multipass
           export BENCHMARK_THRESHOLD=0.10
           export BENCHMARK_BASELINE_FILE=/tmp/perf_baseline.json
+          export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary.md
 
-          set +e
           bash .ci/run_test_suite.sh
-          EXIT_CODE=$?
-          set -e
-          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
-          exit $EXIT_CODE
         continue-on-error: true
 
-      - name: Comment on PR (Success)
-        if: steps.perf-check.outputs.exit_code == '0'
+      - name: Comment on PR
+        if: always()
         uses: actions/github-script@v6
         with:
           script: |
+            const fs = require('fs');
+            const passed = '${{ steps.perf-check.outcome }}' === 'success';
+            let summary = '';
+            try {
+              summary = fs.readFileSync('/tmp/perf_summary.md', 'utf8');
+            } catch (e) {
+              summary = '_No benchmark summary available._';
+            }
+            const icon = passed ? '✅' : '⚠️';
+            const title = passed
+              ? 'Performance Check Passed'
+              : 'Performance Regression Detected';
+            const body = `${icon} **${title}**\n\n${summary}`;
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ **Performance Check Passed**\n\nNo significant performance regression detected (< 10% threshold).'
-            })
-
-      - name: Comment on PR (Regression)
-        if: steps.perf-check.outputs.exit_code == '1'
-        uses: actions/github-script@v6
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '⚠️ **Performance Regression Detected**\n\nSome benchmarks show >10% performance degradation compared to `${{ github.base_ref }}`. Please check the workflow logs for details.'
-            })
+              body: body
+            });
 
       - name: Fail on regression
-        if: steps.perf-check.outputs.exit_code == '1'
+        if: steps.perf-check.outcome == 'failure'
         run: |
           echo "::error::Performance regression detected. See logs for details."
           exit 1
