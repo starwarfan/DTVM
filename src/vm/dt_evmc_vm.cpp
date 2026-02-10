@@ -21,6 +21,8 @@ namespace {
 using namespace zen::runtime;
 using namespace zen::common;
 
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+
 // JIT compilation limits (95% < 10KB)
 const size_t MAX_JIT_BYTECODE_SIZE = 0x6000;
 
@@ -97,6 +99,8 @@ size_t estimateMirInstructionCount(const uint8_t *Code, size_t CodeSize) {
   }
   return Estimate;
 }
+
+#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 
 // RAII helper for temporarily changing runtime configuration
 class ScopedConfig {
@@ -221,6 +225,7 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
       return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
     }
   }
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
   // Use interpreter mode for bytecode that would be too expensive to JIT:
   // either the raw bytecode is very large, or opcodes like MUL would expand
   // to so many MIR instructions that register allocation becomes impractical.
@@ -232,6 +237,7 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
     NewConfig.Mode = RunMode::InterpMode;
     TempConfig = std::make_unique<ScopedConfig>(VM->RT.get(), NewConfig);
   }
+#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 
   uint32_t CheckSum = crc32(Code, CodeSize);
   uint64_t ModKey = (static_cast<uint64_t>(Rev) << 32) | CheckSum;
