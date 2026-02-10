@@ -342,6 +342,13 @@ public:
     U256Inst Shift = extractU256Operand(ShiftOp);
     U256Inst Value = extractU256Operand(ValueOp);
 
+    // Detect DUP pattern: when both operands originate from the same stack
+    // value (e.g., DUP1 SHL), the MIR pointers are identical. In this pattern
+    // the shift result feeds back as both operands of the next shift, creating
+    // extremely long live ranges that cause register allocation to explode.
+    // Insert spill points (protectUnsafeValue) to break the chains.
+    bool BreakLiveRanges = (Shift == Value);
+
     // Check if shift amount >= 256
     // (EVM spec: result is 0 for SHL/SHR, sign-extended for SAR)
     MInstruction *IsLargeShift = isU256GreaterOrEqual(Shift, 256);
@@ -352,11 +359,14 @@ public:
     U256Inst Result = {};
 
     if constexpr (Operator == BinaryOperator::BO_SHL) {
-      Result = handleLeftShift(Value, ShiftAmount, IsLargeShift);
+      Result = handleLeftShift(Value, ShiftAmount, IsLargeShift,
+                               BreakLiveRanges);
     } else if constexpr (Operator == BinaryOperator::BO_SHR_U) {
-      Result = handleLogicalRightShift(Value, ShiftAmount, IsLargeShift);
+      Result = handleLogicalRightShift(Value, ShiftAmount, IsLargeShift,
+                                       BreakLiveRanges);
     } else if constexpr (Operator == BinaryOperator::BO_SHR_S) {
-      Result = handleArithmeticRightShift(Value, ShiftAmount, IsLargeShift);
+      Result = handleArithmeticRightShift(Value, ShiftAmount, IsLargeShift,
+                                          BreakLiveRanges);
     }
 
     return Operand(Result, EVMType::UINT256);
@@ -559,15 +569,18 @@ private:
       CompareOperator Operator);
 
   U256Inst handleLeftShift(const U256Inst &Value, MInstruction *ShiftAmount,
-                           MInstruction *IsLargeShift);
+                           MInstruction *IsLargeShift,
+                           bool BreakLiveRanges = false);
 
   U256Inst handleLogicalRightShift(const U256Inst &Value,
                                    MInstruction *ShiftAmount,
-                                   MInstruction *IsLargeShift);
+                                   MInstruction *IsLargeShift,
+                                   bool BreakLiveRanges = false);
 
   U256Inst handleArithmeticRightShift(const U256Inst &Value,
                                       MInstruction *ShiftAmount,
-                                      MInstruction *IsLargeShift);
+                                      MInstruction *IsLargeShift,
+                                      bool BreakLiveRanges = false);
 
   // Helper functions for inline U256 multiplication
   MInstruction *createEvmUmul128(MInstruction *LHS, MInstruction *RHS);

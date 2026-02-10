@@ -1776,7 +1776,8 @@ EVMMirBuilder::handleClz(const Operand &ValueOp) {
 
 EVMMirBuilder::U256Inst
 EVMMirBuilder::handleLeftShift(const U256Inst &Value, MInstruction *ShiftAmount,
-                               MInstruction *IsLargeShift) {
+                               MInstruction *IsLargeShift,
+                               bool BreakLiveRanges) {
   MType *MirI64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
   U256Inst Result = {};
@@ -1836,6 +1837,11 @@ EVMMirBuilder::handleLeftShift(const U256Inst &Value, MInstruction *ShiftAmount,
     }
     SrcValue = createInstruction<SelectInstruction>(false, MirI64Type,
                                                     IsInBounds, SrcValue, Zero);
+    // When operands are identical (DUP pattern), break live ranges to prevent
+    // register allocation explosion from long dependency chains.
+    if (BreakLiveRanges) {
+      SrcValue = protectUnsafeValue(SrcValue, MirI64Type);
+    }
 
     // Calculate previous component index for carry bits
     // prev_idx = src_idx - 1
@@ -1886,6 +1892,9 @@ EVMMirBuilder::handleLeftShift(const U256Inst &Value, MInstruction *ShiftAmount,
       CarryValue = createInstruction<SelectInstruction>(
           false, MirI64Type, IsMatch, CarryBits, CarryValue);
     }
+    if (BreakLiveRanges) {
+      CarryValue = protectUnsafeValue(CarryValue, MirI64Type);
+    }
 
     // Shift the source value left by the modulo amount
     // shifted_value = src_value << shift_mod
@@ -1911,7 +1920,8 @@ EVMMirBuilder::handleLeftShift(const U256Inst &Value, MInstruction *ShiftAmount,
 EVMMirBuilder::U256Inst
 EVMMirBuilder::handleLogicalRightShift(const U256Inst &Value,
                                        MInstruction *ShiftAmount,
-                                       MInstruction *IsLargeShift) {
+                                       MInstruction *IsLargeShift,
+                                       bool BreakLiveRanges) {
   MType *MirI64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
   U256Inst Result = {};
@@ -1968,6 +1978,9 @@ EVMMirBuilder::handleLogicalRightShift(const U256Inst &Value,
     }
     SrcValue = createInstruction<SelectInstruction>(false, MirI64Type,
                                                     IsInBounds, SrcValue, Zero);
+    if (BreakLiveRanges) {
+      SrcValue = protectUnsafeValue(SrcValue, MirI64Type);
+    }
 
     // Calculate next component index for carry bits
     // next_idx = src_idx + 1
@@ -2014,6 +2027,9 @@ EVMMirBuilder::handleLogicalRightShift(const U256Inst &Value,
       CarryValue = createInstruction<SelectInstruction>(
           false, MirI64Type, IsMatch, CarryBits, CarryValue);
     }
+    if (BreakLiveRanges) {
+      CarryValue = protectUnsafeValue(CarryValue, MirI64Type);
+    }
 
     // Shift the source value right by the modulo amount
     // shifted_value = src_value >> shift_mod
@@ -2039,7 +2055,8 @@ EVMMirBuilder::handleLogicalRightShift(const U256Inst &Value,
 EVMMirBuilder::U256Inst
 EVMMirBuilder::handleArithmeticRightShift(const U256Inst &Value,
                                           MInstruction *ShiftAmount,
-                                          MInstruction *IsLargeShift) {
+                                          MInstruction *IsLargeShift,
+                                          bool BreakLiveRanges) {
   MType *MirI64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
   U256Inst Result = {};
@@ -2103,6 +2120,9 @@ EVMMirBuilder::handleArithmeticRightShift(const U256Inst &Value,
     }
     SrcValue = createInstruction<SelectInstruction>(
         false, MirI64Type, IsInBounds, SrcValue, LargeShiftResult);
+    if (BreakLiveRanges) {
+      SrcValue = protectUnsafeValue(SrcValue, MirI64Type);
+    }
 
     // Calculate next component index for carry bits
     // next_idx = src_idx + 1
@@ -2148,6 +2168,9 @@ EVMMirBuilder::handleArithmeticRightShift(const U256Inst &Value,
         false, OP_shl, MirI64Type, NextValue, CarryShift);
     MInstruction *CarryValue = createInstruction<SelectInstruction>(
         false, MirI64Type, HasShift, CarryBits, Zero);
+    if (BreakLiveRanges) {
+      CarryValue = protectUnsafeValue(CarryValue, MirI64Type);
+    }
 
     // Use logical right shift; sign extension is handled via LargeShiftResult.
     MInstruction *ShiftedValue = createInstruction<BinaryInstruction>(
