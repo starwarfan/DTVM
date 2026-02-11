@@ -359,8 +359,8 @@ public:
     U256Inst Result = {};
 
     if constexpr (Operator == BinaryOperator::BO_SHL) {
-      Result = handleLeftShift(Value, ShiftAmount, IsLargeShift,
-                               BreakLiveRanges);
+      Result =
+          handleLeftShift(Value, ShiftAmount, IsLargeShift, BreakLiveRanges);
     } else if constexpr (Operator == BinaryOperator::BO_SHR_U) {
       Result = handleLogicalRightShift(Value, ShiftAmount, IsLargeShift,
                                        BreakLiveRanges);

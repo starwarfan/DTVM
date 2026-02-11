@@ -1917,11 +1917,9 @@ EVMMirBuilder::handleLeftShift(const U256Inst &Value, MInstruction *ShiftAmount,
   return Result;
 }
 
-EVMMirBuilder::U256Inst
-EVMMirBuilder::handleLogicalRightShift(const U256Inst &Value,
-                                       MInstruction *ShiftAmount,
-                                       MInstruction *IsLargeShift,
-                                       bool BreakLiveRanges) {
+EVMMirBuilder::U256Inst EVMMirBuilder::handleLogicalRightShift(
+    const U256Inst &Value, MInstruction *ShiftAmount,
+    MInstruction *IsLargeShift, bool BreakLiveRanges) {
   MType *MirI64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
   U256Inst Result = {};
@@ -2052,11 +2050,9 @@ EVMMirBuilder::handleLogicalRightShift(const U256Inst &Value,
   return Result;
 }
 
-EVMMirBuilder::U256Inst
-EVMMirBuilder::handleArithmeticRightShift(const U256Inst &Value,
-                                          MInstruction *ShiftAmount,
-                                          MInstruction *IsLargeShift,
-                                          bool BreakLiveRanges) {
+EVMMirBuilder::U256Inst EVMMirBuilder::handleArithmeticRightShift(
+    const U256Inst &Value, MInstruction *ShiftAmount,
+    MInstruction *IsLargeShift, bool BreakLiveRanges) {
   MType *MirI64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
   U256Inst Result = {};
