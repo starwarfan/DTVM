@@ -349,6 +349,588 @@ void BaseInterpreter::interpret() {
         (uint64_t)Frame->Msg.gas >= GasChunkCost[ChunkStartPc]) {
       const uint32_t ChunkEnd = GasChunkEnd[ChunkStartPc];
       Frame->Msg.gas -= GasChunkCost[ChunkStartPc];
+#if defined(__GNUC__)
+      // =================== COMPUTED GOTO FAST PATH ===================
+      // Uses computed goto (GCC/Clang extension) for better branch
+      // prediction (one indirect branch predictor entry per opcode),
+      // local stack pointer for register allocation, and inlined hot
+      // opcodes to eliminate EVMResource static global loads.
+      {
+      uint64_t Pc = Frame->Pc;
+      size_t sp = Frame->Sp;
+
+      // Dispatch table: 256 entries, one per opcode byte value.
+      // Initialized once at first call (label addresses are stable for
+      // non-nested functions in GCC/Clang).
+      static void *cgoto_table[256] = {};
+      static bool cgoto_initialized = false;
+      if (!cgoto_initialized) {
+        for (int i = 0; i < 256; i++)
+          cgoto_table[i] = &&TARGET_UNDEFINED;
+        cgoto_table[0x00] = &&TARGET_STOP;
+        cgoto_table[0x01] = &&TARGET_ADD;
+        cgoto_table[0x02] = &&TARGET_MUL;
+        cgoto_table[0x03] = &&TARGET_SUB;
+        cgoto_table[0x04] = &&TARGET_DIV;
+        cgoto_table[0x05] = &&TARGET_SDIV;
+        cgoto_table[0x06] = &&TARGET_MOD;
+        cgoto_table[0x07] = &&TARGET_SMOD;
+        cgoto_table[0x08] = &&TARGET_ADDMOD;
+        cgoto_table[0x09] = &&TARGET_MULMOD;
+        cgoto_table[0x0a] = &&TARGET_EXP;
+        cgoto_table[0x0b] = &&TARGET_SIGNEXTEND;
+        cgoto_table[0x10] = &&TARGET_LT;
+        cgoto_table[0x11] = &&TARGET_GT;
+        cgoto_table[0x12] = &&TARGET_SLT;
+        cgoto_table[0x13] = &&TARGET_SGT;
+        cgoto_table[0x14] = &&TARGET_EQ;
+        cgoto_table[0x15] = &&TARGET_ISZERO;
+        cgoto_table[0x16] = &&TARGET_AND;
+        cgoto_table[0x17] = &&TARGET_OR;
+        cgoto_table[0x18] = &&TARGET_XOR;
+        cgoto_table[0x19] = &&TARGET_NOT;
+        cgoto_table[0x1a] = &&TARGET_BYTE;
+        cgoto_table[0x1b] = &&TARGET_SHL;
+        cgoto_table[0x1c] = &&TARGET_SHR;
+        cgoto_table[0x1d] = &&TARGET_SAR;
+        cgoto_table[0x1e] = &&TARGET_CLZ;
+        cgoto_table[0x20] = &&TARGET_KECCAK256;
+        cgoto_table[0x30] = &&TARGET_ADDRESS;
+        cgoto_table[0x31] = &&TARGET_BALANCE;
+        cgoto_table[0x32] = &&TARGET_ORIGIN;
+        cgoto_table[0x33] = &&TARGET_CALLER;
+        cgoto_table[0x34] = &&TARGET_CALLVALUE;
+        cgoto_table[0x35] = &&TARGET_CALLDATALOAD;
+        cgoto_table[0x36] = &&TARGET_CALLDATASIZE;
+        cgoto_table[0x37] = &&TARGET_CALLDATACOPY;
+        cgoto_table[0x38] = &&TARGET_CODESIZE;
+        cgoto_table[0x39] = &&TARGET_CODECOPY;
+        cgoto_table[0x3a] = &&TARGET_GASPRICE;
+        cgoto_table[0x3b] = &&TARGET_EXTCODESIZE;
+        cgoto_table[0x3c] = &&TARGET_EXTCODECOPY;
+        cgoto_table[0x3d] = &&TARGET_RETURNDATASIZE;
+        cgoto_table[0x3e] = &&TARGET_RETURNDATACOPY;
+        cgoto_table[0x3f] = &&TARGET_EXTCODEHASH;
+        cgoto_table[0x40] = &&TARGET_BLOCKHASH;
+        cgoto_table[0x41] = &&TARGET_COINBASE;
+        cgoto_table[0x42] = &&TARGET_TIMESTAMP;
+        cgoto_table[0x43] = &&TARGET_NUMBER;
+        cgoto_table[0x44] = &&TARGET_PREVRANDAO;
+        cgoto_table[0x45] = &&TARGET_GASLIMIT;
+        cgoto_table[0x46] = &&TARGET_CHAINID;
+        cgoto_table[0x47] = &&TARGET_SELFBALANCE;
+        cgoto_table[0x48] = &&TARGET_BASEFEE;
+        cgoto_table[0x49] = &&TARGET_BLOBHASH;
+        cgoto_table[0x4a] = &&TARGET_BLOBBASEFEE;
+        cgoto_table[0x50] = &&TARGET_POP;
+        cgoto_table[0x51] = &&TARGET_MLOAD;
+        cgoto_table[0x52] = &&TARGET_MSTORE;
+        cgoto_table[0x53] = &&TARGET_MSTORE8;
+        cgoto_table[0x54] = &&TARGET_SLOAD;
+        cgoto_table[0x55] = &&TARGET_SSTORE;
+        cgoto_table[0x56] = &&TARGET_JUMP;
+        cgoto_table[0x57] = &&TARGET_JUMPI;
+        cgoto_table[0x58] = &&TARGET_PC;
+        cgoto_table[0x59] = &&TARGET_MSIZE;
+        cgoto_table[0x5a] = &&TARGET_GAS;
+        cgoto_table[0x5b] = &&TARGET_JUMPDEST;
+        cgoto_table[0x5c] = &&TARGET_TLOAD;
+        cgoto_table[0x5d] = &&TARGET_TSTORE;
+        cgoto_table[0x5e] = &&TARGET_MCOPY;
+        cgoto_table[0x5f] = &&TARGET_PUSH0;
+        for (int i = 0x60; i <= 0x7f; i++)
+          cgoto_table[i] = &&TARGET_PUSHX;
+        for (int i = 0x80; i <= 0x8f; i++)
+          cgoto_table[i] = &&TARGET_DUPX;
+        for (int i = 0x90; i <= 0x9f; i++)
+          cgoto_table[i] = &&TARGET_SWAPX;
+        for (int i = 0xa0; i <= 0xa4; i++)
+          cgoto_table[i] = &&TARGET_LOGX;
+        cgoto_table[0xf0] = &&TARGET_CREATEX;
+        cgoto_table[0xf1] = &&TARGET_CALLX;
+        cgoto_table[0xf2] = &&TARGET_CALLX;
+        cgoto_table[0xf3] = &&TARGET_RETURN;
+        cgoto_table[0xf4] = &&TARGET_CALLX;
+        cgoto_table[0xf5] = &&TARGET_CREATEX;
+        cgoto_table[0xfa] = &&TARGET_CALLX;
+        cgoto_table[0xfd] = &&TARGET_REVERT;
+        cgoto_table[0xfe] = &&TARGET_INVALID;
+        cgoto_table[0xff] = &&TARGET_SELFDESTRUCT;
+        cgoto_initialized = true;
+      }
+
+// Dispatch to next opcode or exit if chunk boundary reached
+#define DISPATCH_NEXT                                                          \
+  do {                                                                         \
+    if (INTX_UNLIKELY(Pc >= ChunkEnd))                                         \
+      goto cgoto_chunk_done;                                                   \
+    goto *cgoto_table[static_cast<uint8_t>(Code[Pc])];                         \
+  } while (0)
+
+// Write back local sp/Pc, set EVMResource, call handler, reload sp,
+// advance Pc, check status, and dispatch next opcode
+#define HANDLER_CALL(handler_expr)                                             \
+  do {                                                                         \
+    Frame->Sp = sp;                                                            \
+    Frame->Pc = Pc;                                                            \
+    EVMResource::setExecutionContext(Frame, &Context);                          \
+    handler_expr;                                                              \
+    sp = Frame->Sp;                                                            \
+    ++Pc;                                                                      \
+    if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS))                    \
+      goto cgoto_error;                                                        \
+    DISPATCH_NEXT;                                                             \
+  } while (0)
+
+      // Initial dispatch
+      goto *cgoto_table[static_cast<uint8_t>(Code[Pc])];
+
+      // ---- Inline binary arithmetic/logic ops ----
+      TARGET_ADD: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = A + B;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_MUL: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = A * B;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SUB: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = A - B;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_DIV: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = (B == 0) ? intx::uint256(0) : (A / B);
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SDIV: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = (B == 0) ? intx::uint256(0) : intx::sdivrem(A, B).quot;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_MOD: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = (B == 0) ? intx::uint256(0) : A % B;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SMOD: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = (B == 0) ? intx::uint256(0) : intx::sdivrem(A, B).rem;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_LT: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = intx::uint256(A < B);
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_GT: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = intx::uint256(A > B);
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SLT: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = intx::uint256(intx::slt(A, B));
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SGT: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = intx::uint256(intx::slt(B, A));
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_EQ: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = intx::uint256(A == B);
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_AND: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = A & B;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_OR: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = A | B;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_XOR: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = A ^ B;
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SHL: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = (A < 256) ? (B << A) : intx::uint256(0);
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SHR: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        B = (A < 256) ? (B >> A) : intx::uint256(0);
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+
+      // ---- Inline ternary ops ----
+      TARGET_ADDMOD: {
+        if (INTX_UNLIKELY(sp < 3)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        auto &C = Frame->Stack[sp - 3];
+        C = (C == 0) ? intx::uint256(0) : intx::addmod(A, B, C);
+        sp -= 2; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_MULMOD: {
+        if (INTX_UNLIKELY(sp < 3)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1]; auto &B = Frame->Stack[sp - 2];
+        auto &C = Frame->Stack[sp - 3];
+        C = (C == 0) ? intx::uint256(0) : intx::mulmod(A, B, C);
+        sp -= 2; ++Pc; DISPATCH_NEXT;
+      }
+
+      // ---- Inline unary ops ----
+      TARGET_ISZERO: {
+        if (INTX_UNLIKELY(sp < 1)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1];
+        A = intx::uint256(A == 0);
+        ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_NOT: {
+        if (INTX_UNLIKELY(sp < 1)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1];
+        A = ~A;
+        ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_CLZ: {
+        if (INTX_UNLIKELY(sp < 1)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        auto &A = Frame->Stack[sp - 1];
+        A = intx::clz(A);
+        ++Pc; DISPATCH_NEXT;
+      }
+
+      // ---- Inline stack ops ----
+      TARGET_POP: {
+        if (INTX_UNLIKELY(sp < 1)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        --sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_PUSH0: {
+        if (INTX_UNLIKELY(sp >= MAXSTACK)) { Context.setStatus(EVMC_STACK_OVERFLOW); goto cgoto_error; }
+        Frame->Stack[sp++] = 0;
+        ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_PUSHX: {
+        if (INTX_UNLIKELY(sp >= MAXSTACK)) { Context.setStatus(EVMC_STACK_OVERFLOW); goto cgoto_error; }
+        Frame->Stack[sp++] = PushValueMap[Pc];
+        const uint8_t NumBytes = static_cast<uint8_t>(Code[Pc]) - static_cast<uint8_t>(evmc_opcode::OP_PUSH1) + 1;
+        Pc += 1 + NumBytes;
+        DISPATCH_NEXT;
+      }
+      TARGET_DUPX: {
+        const uint32_t N = static_cast<uint8_t>(Code[Pc]) - static_cast<uint8_t>(evmc_opcode::OP_DUP1) + 1;
+        if (INTX_UNLIKELY(sp < N)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        if (INTX_UNLIKELY(sp >= MAXSTACK)) { Context.setStatus(EVMC_STACK_OVERFLOW); goto cgoto_error; }
+        Frame->Stack[sp] = Frame->Stack[sp - N];
+        ++sp; ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_SWAPX: {
+        const uint32_t N = static_cast<uint8_t>(Code[Pc]) - static_cast<uint8_t>(evmc_opcode::OP_SWAP1) + 1;
+        if (INTX_UNLIKELY(sp < N + 1)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        const size_t TopIdx = sp - 1;
+        const size_t NthIdx = sp - 1 - N;
+        const intx::uint256 Tmp = Frame->Stack[TopIdx];
+        Frame->Stack[TopIdx] = Frame->Stack[NthIdx];
+        Frame->Stack[NthIdx] = Tmp;
+        ++Pc; DISPATCH_NEXT;
+      }
+
+      // ---- Inline control flow ops ----
+      TARGET_JUMP: {
+        if (INTX_UNLIKELY(sp < 1)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        --sp;
+        const uint64_t Dest = Uint256ToUint64(Frame->Stack[sp]);
+        if (INTX_UNLIKELY(Dest >= CodeSize)) { Context.setStatus(EVMC_BAD_JUMP_DESTINATION); goto cgoto_error; }
+        if (INTX_UNLIKELY(JumpDestMap[Dest] == 0)) { Context.setStatus(EVMC_BAD_JUMP_DESTINATION); goto cgoto_error; }
+        Pc = Dest;
+        Frame->Sp = sp;
+        Frame->Pc = Pc;
+        goto cgoto_restart;
+      }
+      TARGET_JUMPI: {
+        if (INTX_UNLIKELY(sp < 2)) { Context.setStatus(EVMC_STACK_UNDERFLOW); goto cgoto_error; }
+        --sp;
+        const uint64_t Dest = Uint256ToUint64(Frame->Stack[sp]);
+        --sp;
+        const intx::uint256 &Cond = Frame->Stack[sp];
+        if (!Cond) {
+          ++Pc; DISPATCH_NEXT;
+        }
+        if (INTX_UNLIKELY(Dest >= CodeSize)) { Context.setStatus(EVMC_BAD_JUMP_DESTINATION); goto cgoto_error; }
+        if (INTX_UNLIKELY(JumpDestMap[Dest] == 0)) { Context.setStatus(EVMC_BAD_JUMP_DESTINATION); goto cgoto_error; }
+        Pc = Dest;
+        Frame->Sp = sp;
+        Frame->Pc = Pc;
+        goto cgoto_restart;
+      }
+      TARGET_JUMPDEST: {
+        ++Pc; DISPATCH_NEXT;
+      }
+      TARGET_STOP: {
+        Frame->Sp = sp;
+        Frame->Pc = Pc;
+        const uint64_t RemainingGas = Frame->Msg.gas;
+        Context.setReturnData(std::vector<uint8_t>());
+        Context.freeBackFrame();
+        Frame = Context.getCurFrame();
+        if (!Frame) {
+          const auto &ReturnData = Context.getReturnData();
+          const uint64_t GasLeft = Context.getInstance()->getGas();
+          evmc::Result ExeResult(EVMC_SUCCESS, GasLeft,
+                                 Context.getInstance()->getGasRefund(),
+                                 ReturnData.data(), ReturnData.size());
+          Context.setExeResult(std::move(ExeResult));
+          return;
+        }
+        Frame->Msg.gas += RemainingGas;
+        goto cgoto_restart;
+      }
+      TARGET_INVALID: {
+        Context.setStatus(EVMC_INVALID_INSTRUCTION);
+        goto cgoto_error;
+      }
+      TARGET_UNDEFINED: {
+        Context.setStatus(EVMC_UNDEFINED_INSTRUCTION);
+        goto cgoto_error;
+      }
+
+      // ---- Complex handler ops (delegate to doExecute) ----
+      TARGET_EXP:
+        HANDLER_CALL(ExpHandler::doExecute());
+      TARGET_SIGNEXTEND:
+        HANDLER_CALL(SignExtendHandler::doExecute());
+      TARGET_BYTE:
+        HANDLER_CALL(ByteHandler::doExecute());
+      TARGET_SAR:
+        HANDLER_CALL(SarHandler::doExecute());
+      TARGET_KECCAK256:
+        HANDLER_CALL(Keccak256Handler::doExecute());
+
+      // Environment information
+      TARGET_ADDRESS:
+        HANDLER_CALL(AddressHandler::doExecute());
+      TARGET_BALANCE:
+        HANDLER_CALL(BalanceHandler::doExecute());
+      TARGET_ORIGIN:
+        HANDLER_CALL(OriginHandler::doExecute());
+      TARGET_CALLER:
+        HANDLER_CALL(CallerHandler::doExecute());
+      TARGET_CALLVALUE:
+        HANDLER_CALL(CallValueHandler::doExecute());
+      TARGET_CALLDATALOAD:
+        HANDLER_CALL(CallDataLoadHandler::doExecute());
+      TARGET_CALLDATASIZE:
+        HANDLER_CALL(CallDataSizeHandler::doExecute());
+      TARGET_CALLDATACOPY:
+        HANDLER_CALL(CallDataCopyHandler::doExecute());
+      TARGET_CODESIZE:
+        HANDLER_CALL(CodeSizeHandler::doExecute());
+      TARGET_CODECOPY:
+        HANDLER_CALL(CodeCopyHandler::doExecute());
+      TARGET_GASPRICE:
+        HANDLER_CALL(GasPriceHandler::doExecute());
+      TARGET_EXTCODESIZE:
+        HANDLER_CALL(ExtCodeSizeHandler::doExecute());
+      TARGET_EXTCODECOPY:
+        HANDLER_CALL(ExtCodeCopyHandler::doExecute());
+      TARGET_RETURNDATASIZE:
+        HANDLER_CALL(ReturnDataSizeHandler::doExecute());
+      TARGET_RETURNDATACOPY:
+        HANDLER_CALL(ReturnDataCopyHandler::doExecute());
+      TARGET_EXTCODEHASH:
+        HANDLER_CALL(ExtCodeHashHandler::doExecute());
+
+      // Block information
+      TARGET_BLOCKHASH:
+        HANDLER_CALL(BlockHashHandler::doExecute());
+      TARGET_COINBASE:
+        HANDLER_CALL(CoinBaseHandler::doExecute());
+      TARGET_TIMESTAMP:
+        HANDLER_CALL(TimeStampHandler::doExecute());
+      TARGET_NUMBER:
+        HANDLER_CALL(NumberHandler::doExecute());
+      TARGET_PREVRANDAO:
+        HANDLER_CALL(PrevRanDaoHandler::doExecute());
+      TARGET_GASLIMIT:
+        HANDLER_CALL(GasLimitHandler::doExecute());
+      TARGET_CHAINID:
+        HANDLER_CALL(ChainIdHandler::doExecute());
+      TARGET_SELFBALANCE:
+        HANDLER_CALL(SelfBalanceHandler::doExecute());
+      TARGET_BASEFEE:
+        HANDLER_CALL(BaseFeeHandler::doExecute());
+      TARGET_BLOBHASH:
+        HANDLER_CALL(BlobHashHandler::doExecute());
+      TARGET_BLOBBASEFEE:
+        HANDLER_CALL(BlobBaseFeeHandler::doExecute());
+
+      // Memory & storage
+      TARGET_MLOAD:
+        HANDLER_CALL(MLoadHandler::doExecute());
+      TARGET_MSTORE:
+        HANDLER_CALL(MStoreHandler::doExecute());
+      TARGET_MSTORE8:
+        HANDLER_CALL(MStore8Handler::doExecute());
+      TARGET_SLOAD:
+        HANDLER_CALL(SLoadHandler::doExecute());
+      TARGET_SSTORE:
+        HANDLER_CALL(SStoreHandler::doExecute());
+
+      // Misc
+      TARGET_PC:
+        HANDLER_CALL(PCHandler::doExecute());
+      TARGET_MSIZE:
+        HANDLER_CALL(MSizeHandler::doExecute());
+      TARGET_GAS:
+        HANDLER_CALL(GasHandler::doExecute());
+      TARGET_TLOAD:
+        HANDLER_CALL(TLoadHandler::doExecute());
+      TARGET_TSTORE:
+        HANDLER_CALL(TStoreHandler::doExecute());
+      TARGET_MCOPY:
+        HANDLER_CALL(MCopyHandler::doExecute());
+
+      // Multi-opcode handlers: LOG, CALL, CREATE
+      TARGET_LOGX: {
+        Frame->Sp = sp; Frame->Pc = Pc;
+        EVMResource::setExecutionContext(Frame, &Context);
+        LogHandler::OpCode = static_cast<evmc_opcode>(static_cast<uint8_t>(Code[Pc]));
+        LogHandler::doExecute();
+        sp = Frame->Sp; ++Pc;
+        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS)) goto cgoto_error;
+        DISPATCH_NEXT;
+      }
+      TARGET_CALLX: {
+        Frame->Sp = sp; Frame->Pc = Pc;
+        EVMResource::setExecutionContext(Frame, &Context);
+        CallHandler::OpCode = static_cast<evmc_opcode>(static_cast<uint8_t>(Code[Pc]));
+        CallHandler::doExecute();
+        sp = Frame->Sp; ++Pc;
+        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS)) goto cgoto_error;
+        DISPATCH_NEXT;
+      }
+      TARGET_CREATEX: {
+        Frame->Sp = sp; Frame->Pc = Pc;
+        EVMResource::setExecutionContext(Frame, &Context);
+        CreateHandler::OpCode = static_cast<evmc_opcode>(static_cast<uint8_t>(Code[Pc]));
+        CreateHandler::doExecute();
+        sp = Frame->Sp; ++Pc;
+        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS)) goto cgoto_error;
+        DISPATCH_NEXT;
+      }
+
+      // ---- Special termination handlers (may change Frame) ----
+      TARGET_RETURN: {
+        Frame->Sp = sp; Frame->Pc = Pc;
+        EVMResource::setExecutionContext(Frame, &Context);
+        ReturnHandler::doExecute();
+        Frame = Context.getCurFrame();
+        if (!Frame) {
+          const auto &ReturnData = Context.getReturnData();
+          const uint64_t GasLeft = Context.getInstance()->getGas();
+          evmc::Result ExeResult(EVMC_SUCCESS, GasLeft,
+                                 Context.getInstance()->getGasRefund(),
+                                 ReturnData.data(), ReturnData.size());
+          Context.setExeResult(std::move(ExeResult));
+          return;
+        }
+        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS)) {
+          if (handleExecutionStatus(Frame, Context)) { return; }
+          goto cgoto_break_outer;
+        }
+        goto cgoto_restart;
+      }
+      TARGET_REVERT: {
+        Frame->Sp = sp; Frame->Pc = Pc;
+        EVMResource::setExecutionContext(Frame, &Context);
+        RevertHandler::doExecute();
+        Frame = Context.getCurFrame();
+        if (!Frame) {
+          const auto &ReturnData = Context.getReturnData();
+          const uint64_t GasLeft = Context.getInstance()->getGas();
+          evmc::Result ExeResult(EVMC_REVERT, GasLeft,
+                                 Context.getInstance()->getGasRefund(),
+                                 ReturnData.data(), ReturnData.size());
+          Context.setExeResult(std::move(ExeResult));
+          return;
+        }
+        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS)) {
+          if (handleExecutionStatus(Frame, Context)) { return; }
+          goto cgoto_break_outer;
+        }
+        goto cgoto_restart;
+      }
+      TARGET_SELFDESTRUCT: {
+        Frame->Sp = sp; Frame->Pc = Pc;
+        EVMResource::setExecutionContext(Frame, &Context);
+        SelfDestructHandler::doExecute();
+        Frame = Context.getCurFrame();
+        if (!Frame) {
+          const auto &ReturnData = Context.getReturnData();
+          const uint64_t GasLeft = Context.getInstance()->getGas();
+          evmc::Result ExeResult(EVMC_SUCCESS, GasLeft,
+                                 Context.getInstance()->getGasRefund(),
+                                 ReturnData.data(), ReturnData.size());
+          Context.setExeResult(std::move(ExeResult));
+          return;
+        }
+        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS)) {
+          if (handleExecutionStatus(Frame, Context)) { return; }
+          goto cgoto_break_outer;
+        }
+        goto cgoto_restart;
+      }
+
+      // ---- Exit labels ----
+      cgoto_chunk_done:
+        Frame->Sp = sp;
+        Frame->Pc = Pc;
+        goto cgoto_continue_outer;
+
+      cgoto_restart:
+        goto cgoto_continue_outer;
+
+      cgoto_error:
+        Frame->Sp = sp;
+        Frame->Pc = Pc;
+        if (handleExecutionStatus(Frame, Context)) {
+          return;
+        }
+        goto cgoto_break_outer;
+
+#undef DISPATCH_NEXT
+#undef HANDLER_CALL
+      }
+      cgoto_continue_outer:
+      continue;
+      cgoto_break_outer:
+      break;
+#else
       bool RestartDispatch = false;
       while (Frame->Pc < ChunkEnd) {
         const Byte OpcodeByte = Code[Frame->Pc];
@@ -761,6 +1343,7 @@ void BaseInterpreter::interpret() {
         continue;
       }
       continue;
+#endif
     }
 
     Byte OpcodeByte = Code[Frame->Pc];
