@@ -298,8 +298,7 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
 
   // Reuse cached InterpreterExecContext to avoid ~32KB frame alloc per call
   if (!VM->CachedCtx) {
-    VM->CachedCtx =
-        std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
+    VM->CachedCtx = std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
   } else {
     VM->CachedCtx->resetForNewCall(TheInst);
   }
