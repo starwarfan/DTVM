@@ -1,0 +1,193 @@
+<mxfile>
+  <diagram name="DTVM WASM Execution Path" id="wasm-path">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title-bar" value="DTVM - WebAssembly Execution Path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4a86c8;strokeColor=none;fontColor=#ffffff;fontSize=16;fontStyle=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="10" width="900" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-parse" value="Parsing" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="68" width="60" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="wasm-file" value=".wasm Binary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="58" width="140" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="codeholder" value="CodeHolder" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="58" width="130" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="modloader" value="ModuleLoader" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="450" y="58" width="140" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="module" value="&lt;b&gt;Module&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="640" y="58" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-wasm-ch" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="wasm-file" target="codeholder">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-ch-ml" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="codeholder" target="modloader">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-ml-mod" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="modloader" target="module">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep1" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="112" as="sourcePoint"/>
+            <mxPoint x="980" y="112" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-sections" value="Module&#xa;Sections" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="128" width="60" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-types" value="Types" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-imports" value="Imports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="200" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-funcs" value="Functions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="300" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-tables" value="Tables" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-memory" value="Memory" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-globals" value="Globals" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="600" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-exports" value="Exports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sec-code" value="Code" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F4FD;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="800" y="125" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep2" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="170" as="sourcePoint"/>
+            <mxPoint x="980" y="170" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-ir-build" value="IR Build" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="192" width="60" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="funcloader" value="&lt;b&gt;FunctionLoader&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Per-function bytecode&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="182" width="180" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="bcvisitor" value="&lt;b&gt;WASMByteCodeVisitor&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Walk WASM bytecode&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="182" width="210" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="mirbuilder" value="&lt;b&gt;FunctionMirBuilder&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Build dMIR from WASM&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="590" y="182" width="200" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-fl-bv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="funcloader" target="bcvisitor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-bv-mb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="bcvisitor" target="mirbuilder">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep3" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="242" as="sourcePoint"/>
+            <mxPoint x="980" y="242" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-ir" value="IR" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="262" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="dmir" value="&lt;b&gt;dMIR (Deterministic MIR)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;MModule / MFunction / MBasicBlock / MInstruction&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="252" width="690" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-mb-dmir" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.78;entryY=0;" edge="1" parent="1" source="mirbuilder" target="dmir">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep4" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="318" as="sourcePoint"/>
+            <mxPoint x="980" y="318" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-exec" value="Execution" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="390" width="70" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="interp" value="&lt;b&gt;Interpreter&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;action::BaseInterpreter&lt;br&gt;Value Stack + Control Stack&lt;br&gt;Direct bytecode execution&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="335" width="220" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="sp-jit" value="&lt;b&gt;Singlepass JIT&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;singlepass::JITCompiler&lt;br&gt;AsmJit backend&lt;br&gt;x86-64 / ARM64&lt;br&gt;Fast compilation&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="350" y="335" width="220" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="mp-jit" value="&lt;b&gt;Multipass JIT&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;LazyJIT / EagerJIT (LLVM 15)&lt;br&gt;dMIR &#x2192; CGIR &#x2192; Target (x86)&lt;br&gt;Register Allocation (FastRA/GreedyRA)&lt;br&gt;FLAT / FLAS modes&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="600" y="335" width="260" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-dmir-interp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.18;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dmir" target="interp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-dmir-sp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dmir" target="sp-jit">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-dmir-mp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.85;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dmir" target="mp-jit">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep5" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="458" as="sourcePoint"/>
+            <mxPoint x="980" y="458" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-rt" value="Runtime" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="488" width="65" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="instance" value="&lt;b&gt;Instance&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;callWasmFunction&#xa;callWasmFunctionOnPhysStack&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="475" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="instantiator" value="&lt;b&gt;Instantiator&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;Init globals, memory, tables&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="420" y="475" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="mem-mgr" value="&lt;b&gt;Memory Manager&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;WasmMemoryAllocator / mmap&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="680" y="475" width="230" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-interp-inst" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.3;entryY=0;" edge="1" parent="1" source="interp" target="instance">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-sp-inst" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.7;entryY=0;" edge="1" parent="1" source="sp-jit" target="instance">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-mp-inst" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="mp-jit" target="instantiator">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep6" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="542" as="sourcePoint"/>
+            <mxPoint x="980" y="542" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-host" value="Host" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="565" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-wasi" value="&lt;b&gt;WASI&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;File I/O, Clock&lt;br&gt;Args, Environ&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="555" width="150" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-env" value="&lt;b&gt;env (libc)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Memory, Math&lt;br&gt;String ops&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="270" y="555" width="150" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-spec" value="&lt;b&gt;spectest&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Spec test harness&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="440" y="555" width="150" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="entry-pts" value="&lt;b&gt;Entry Points&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;callNative_x86_64.S&lt;br&gt;callNative_aarch64.S&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="620" y="555" width="180" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-inst-wasi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.2;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="instance" target="host-wasi">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-inst-env" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.6;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="instance" target="host-env">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-inst-spec" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.9;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="instance" target="host-spec">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

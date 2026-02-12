@@ -1,0 +1,178 @@
+<mxfile>
+  <diagram name="DTVM EVM Execution Path" id="evm-path">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title-bar" value="DTVM - EVM Execution Path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d6a21e;strokeColor=none;fontColor=#ffffff;fontSize=16;fontStyle=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="10" width="900" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-input" value="Input" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="72" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-bytecode" value="EVM Bytecode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="58" width="150" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="codeholder" value="CodeHolder" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="58" width="140" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="evmmodloader" value="EVMModuleLoader" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="490" y="58" width="160" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="evmmodule" value="&lt;b&gt;EVMModule&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="58" width="140" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-evm-ch" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="evm-bytecode" target="codeholder">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-ch-eml" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="codeholder" target="evmmodloader">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-eml-mod" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="evmmodloader" target="evmmodule">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep1" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="115" as="sourcePoint"/>
+            <mxPoint x="980" y="115" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-evmc" value="EVMC" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="142" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="evmc-api" value="&lt;b&gt;EVMC API&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;evmc_create_dtvmapi&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3D;strokeColor=#232F3D;fontColor=#ffffff;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="128" width="190" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="evmc-vm" value="&lt;b&gt;dt_evmc_vm&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;VM wrapper (create, destroy, execute)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3D;strokeColor=#232F3D;fontColor=#ffffff;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="128" width="230" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="evmc-host" value="&lt;b&gt;evmc::Host&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;wrapped_host.h&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3D;strokeColor=#232F3D;fontColor=#ffffff;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="620" y="128" width="170" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="bc-cache" value="&lt;b&gt;EVMBytecodeCache&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;JUMPDEST analysis&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="835" y="128" width="160" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-api-vm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#999999;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="evmc-api" target="evmc-vm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-vm-host" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#999999;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="evmc-vm" target="evmc-host">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep2" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="192" as="sourcePoint"/>
+            <mxPoint x="980" y="192" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-exec" value="Execution" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="310" width="70" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="exec-label" value="Two Execution Modes" style="text;html=1;fontSize=10;fontStyle=2;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="350" y="198" width="200" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="interp-container" value="EVM Interpreter" style="swimlane;startSize=22;fillColor=#FFF8E1;strokeColor=#d6b656;rounded=1;fontSize=12;fontStyle=1;swimlaneLine=0;" vertex="1" parent="1">
+          <mxGeometry x="100" y="222" width="380" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="base-interp" value="&lt;b&gt;evm::BaseInterpreter&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;callEVMInInterpMode&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="interp-container">
+          <mxGeometry x="15" y="30" width="350" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-frame" value="&lt;b&gt;EVMFrame&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Stack | Memory | Call Data&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="interp-container">
+          <mxGeometry x="15" y="78" width="165" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="opcode-handlers" value="&lt;b&gt;Opcode Handlers&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Arithmetic | Memory&lt;br&gt;Storage | Flow | System&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="interp-container">
+          <mxGeometry x="195" y="78" width="170" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="gas-meter" value="&lt;b&gt;Gas Metering&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Configurable gas limits&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="interp-container">
+          <mxGeometry x="15" y="132" width="165" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-rev" value="&lt;b&gt;EVM Revisions&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;CANCUN etc.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="interp-container">
+          <mxGeometry x="195" y="145" width="170" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="interp-note" value="&lt;font color=&quot;#888888&quot; style=&quot;font-size:9px&quot;&gt;Direct opcode dispatch&lt;br&gt;No compilation overhead&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="interp-container">
+          <mxGeometry x="40" y="185" width="180" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="jit-container" value="EVM JIT (Multipass Only)" style="swimlane;startSize=22;fillColor=#EDE7F6;strokeColor=#9673a6;rounded=1;fontSize=12;fontStyle=1;swimlaneLine=0;" vertex="1" parent="1">
+          <mxGeometry x="520" y="222" width="380" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-mir-builder" value="&lt;b&gt;EVMMirBuilder&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;EVMFrontendContext&lt;br&gt;callEVMInJITMode&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="jit-container">
+          <mxGeometry x="15" y="30" width="350" height="48" as="geometry"/>
+        </mxCell>
+        <mxCell id="u256" value="&lt;b&gt;U256 Handling&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;4 x i64 representation&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="jit-container">
+          <mxGeometry x="15" y="88" width="165" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="dmir" value="&lt;b&gt;dMIR &#x2192; CGIR &#x2192; Target&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Register Allocation&lt;br&gt;x86 lowering&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="jit-container">
+          <mxGeometry x="195" y="88" width="170" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="jit-fallback" value="&lt;b&gt;JIT Fallback&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;Undefined opcodes&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="jit-container">
+          <mxGeometry x="15" y="138" width="165" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="native-code" value="&lt;b&gt;Native Code&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;emitObjectBuffer&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="jit-container">
+          <mxGeometry x="195" y="148" width="170" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="jit-note" value="&lt;font color=&quot;#888888&quot; style=&quot;font-size:9px&quot;&gt;Ahead-of-time compilation&lt;br&gt;LLVM 15 based optimization&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="jit-container">
+          <mxGeometry x="40" y="188" width="200" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep3" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="458" as="sourcePoint"/>
+            <mxPoint x="980" y="458" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-rt" value="Runtime" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="488" width="65" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-instance" value="&lt;b&gt;EVMInstance&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;Memory | Stack | Gas | Message Stack&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="475" width="320" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-call" value="&lt;b&gt;EVM Dispatch&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;callEVMMain / callEVMInInterpMode / callEVMInJITMode&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="460" y="475" width="370" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-interp-inst" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.3;entryY=0;" edge="1" parent="1" source="interp-container" target="evm-instance">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-jit-call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="jit-container" target="evm-call">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep4" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="540" as="sourcePoint"/>
+            <mxPoint x="980" y="540" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-host" value="Host" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="568" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-keccak" value="&lt;b&gt;Keccak256&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;EVM hashing&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="555" width="150" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-crypto" value="&lt;b&gt;Crypto Ops&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;ECRECOVER, etc.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="555" width="150" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-storage" value="&lt;b&gt;Storage Host&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;SLOAD / SSTORE callbacks&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="460" y="555" width="180" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-evmabi" value="&lt;b&gt;EVM ABI Mock&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:9px&quot;&gt;evmabimock host module&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="670" y="555" width="170" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-inst-keccak" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.2;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="evm-instance" target="host-keccak">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-inst-crypto" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.55;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="evm-instance" target="host-crypto">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-call-storage" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.3;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="evm-call" target="host-storage">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-call-abi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.7;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="evm-call" target="host-evmabi">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-vm-interp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.3;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="evmc-vm" target="interp-container">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-vm-jit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.7;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="evmc-vm" target="jit-container">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

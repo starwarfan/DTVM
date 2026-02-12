@@ -1,0 +1,151 @@
+<mxfile>
+  <diagram name="DTVM Overall Architecture" id="overall">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title-bar" value="DTVM (ZetaEngine) - Overall Architecture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4a86c8;strokeColor=none;fontColor=#ffffff;fontSize=16;fontStyle=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="10" width="810" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-input" value="Input" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="72" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-fe" value="Frontend" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="158" width="70" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-ir" value="IR" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="248" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-exec" value="Execution" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="350" width="70" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-rt" value="Runtime" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="452" width="65" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="lbl-host" value="Host" style="text;html=1;fontSize=11;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="15" y="538" width="55" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="wasm-input" value=".wasm File" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="58" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-input" value=".evm Bytecode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="450" y="58" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="evmc-api" value="EVMC API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#232F3D;strokeColor=#232F3D;fontColor=#ffffff;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="58" width="150" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep1" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="118" as="sourcePoint"/>
+            <mxPoint x="900" y="118" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="wasm-fe" value="&lt;b&gt;WASM Frontend&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;ModuleLoader / FunctionLoader&lt;br&gt;BytecodeVisitor / MirBuilder&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="105" y="135" width="260" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="evm-fe" value="&lt;b&gt;EVM Frontend&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;EVMModuleLoader&lt;br&gt;EVMMirBuilder / EVMFrontendContext&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="430" y="135" width="260" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep2" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="218" as="sourcePoint"/>
+            <mxPoint x="900" y="218" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="dmir" value="&lt;b&gt;dMIR (Deterministic MIR)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;MModule / MFunction / MBasicBlock / MInstruction&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="105" y="232" width="585" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep3" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="302" as="sourcePoint"/>
+            <mxPoint x="900" y="302" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="interp" value="&lt;b&gt;Interpreter&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;Bytecode Execution&lt;br&gt;WASM + EVM&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="318" width="185" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="sp-jit" value="&lt;b&gt;Singlepass JIT&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;AsmJit&lt;br&gt;x86-64 / ARM64&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="310" y="318" width="185" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="mp-jit" value="&lt;b&gt;Multipass JIT&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;LLVM 15 / CGIR &#x2192; Target&lt;br&gt;FLAT / FLAS&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="520" y="318" width="195" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep4" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="418" as="sourcePoint"/>
+            <mxPoint x="900" y="418" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rt-box" value="&lt;b&gt;Runtime System&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#555555&quot; style=&quot;font-size:10px&quot;&gt;Runtime Core | Module / Instance | Memory Manager (mmap) | Isolation&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="435" width="615" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="sep5" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=1;strokeColor=#CCCCCC;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="80" y="505" as="sourcePoint"/>
+            <mxPoint x="900" y="505" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="host-wasi" value="WASI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="522" width="120" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-env" value="env (libc)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="240" y="522" width="120" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-spec" value="spectest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="380" y="522" width="120" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="host-evm" value="EVM Host&#xa;(Keccak256)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="522" width="130" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="note-convergence" value="WASM &amp;amp; EVM converge&#xa;at shared dMIR layer" style="text;html=1;fontSize=9;fontStyle=2;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="730" y="240" width="150" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-wasm-fe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="wasm-input" target="wasm-fe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-evm-fe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.4;entryY=0;" edge="1" parent="1" source="evm-input" target="evm-fe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-evmc-fe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.85;entryY=0;" edge="1" parent="1" source="evmc-api" target="evm-fe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-wfe-dmir" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.22;entryY=0;" edge="1" parent="1" source="wasm-fe" target="dmir">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-efe-dmir" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.78;entryY=0;" edge="1" parent="1" source="evm-fe" target="dmir">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-dmir-interp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.15;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dmir" target="interp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-dmir-sp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dmir" target="sp-jit">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-dmir-mp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.87;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dmir" target="mp-jit">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-interp-rt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.15;entryY=0;" edge="1" parent="1" source="interp" target="rt-box">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-sp-rt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="sp-jit" target="rt-box">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-mp-rt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1.5;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.85;entryY=0;" edge="1" parent="1" source="mp-jit" target="rt-box">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-rt-wasi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.1;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="rt-box" target="host-wasi">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-rt-env" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.33;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="rt-box" target="host-env">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-rt-spec" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.55;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="rt-box" target="host-spec">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-rt-evm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=blockThin;endFill=1;endSize=4;strokeWidth=1;strokeColor=#999999;dashed=1;exitX=0.79;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="rt-box" target="host-evm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
