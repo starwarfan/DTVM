@@ -186,6 +186,7 @@ public:
   void finalizeEVMBase();
 
   void meterOpcode(evmc_opcode Opcode, uint64_t PC);
+  void meterOpcodeRange(uint64_t StartPC, uint64_t EndPCExclusive);
   bool isOpcodeDefined(evmc_opcode Opcode) const;
   void meterGas(uint64_t GasCost);
 
@@ -644,10 +645,16 @@ private:
 
   // Jump table for dynamic jumps
   bool HasIndirectJump = false;
+  // Entry blocks for jump targets (may be tiny thunks for shared JUMPDEST
+  // bodies).
   std::map<uint64_t, MBasicBlock *> JumpDestTable;
-  // Consecutive JUMPDEST ranges: {start_pc, end_pc}
-  std::vector<std::pair<uint64_t, uint64_t>> ConsecutiveJumpDests;
-  MBasicBlock *DefaultJumpBB = nullptr; // For invalid jump destinations
+  // Canonical execution blocks for JUMPDEST opcodes in linear decode.
+  std::map<uint64_t, MBasicBlock *> JumpDestBodyTable;
+  // Cached skipped-metering for merged consecutive JUMPDEST runs.
+  // Cache it so meterOpcodeRange(S, E) doesn't have to re-scan the same run.
+  std::vector<uint32_t> JumpDestRunLastPC;   // [S] = E, else invalid sentinel
+  std::vector<uint64_t> JumpDestRunSkipCost; // [S] = sum cost for [S, E)
+  MBasicBlock *DefaultJumpBB = nullptr;      // For invalid jump destinations
 
   std::map<uint64_t, std::vector<MBasicBlock *>> JumpHashTable;
   std::map<uint64_t, std::vector<uint64_t>> JumpHashReverse;
