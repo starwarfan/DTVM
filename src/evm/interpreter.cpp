@@ -741,6 +741,10 @@ void BaseInterpreter::interpret() {
         DISPATCH_NEXT;
       }
       TARGET_CLZ : {
+        if (INTX_UNLIKELY(Revision < EVMC_OSAKA)) {
+          Context.setStatus(EVMC_UNDEFINED_INSTRUCTION);
+          goto cgoto_error;
+        }
         if (INTX_UNLIKELY(sp < 1)) {
           Context.setStatus(EVMC_STACK_UNDERFLOW);
           goto cgoto_error;

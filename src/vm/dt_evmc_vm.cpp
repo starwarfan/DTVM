@@ -188,10 +188,9 @@ bool ensureRuntimeAndIsolation(DTVM *VM) {
 /// Returns nullptr on failure.
 EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
                             evmc_revision Rev, const evmc_message *Msg) {
-  // L0: Code pointer + size check (instant, ~1ns, 2 integer comparisons)
-  if (Code == VM->LastCodePtr && CodeSize == VM->LastCodeSize && VM->L0Mod) {
-    return VM->L0Mod;
-  }
+  // L0 disabled: pointer comparison is unsafe when callers reuse addresses
+  // for different bytecode (e.g. test frameworks, repeated allocations).
+  // Fall through to L1 address-based lookup with content validation.
 
   EVMModule *Mod = nullptr;
 
@@ -236,7 +235,6 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
 EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev) {
   EVMInstance *TheInst = VM->CachedInst;
   if (!TheInst || TheInst->getModule() != Mod) {
-    // Need a new instance (first call or different module)
     if (TheInst) {
       VM->Iso->deleteEVMInstance(TheInst);
       VM->CachedInst = nullptr;
@@ -247,7 +245,6 @@ EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev) {
     TheInst = *InstRet;
     VM->CachedInst = TheInst;
   }
-  // Reset instance for this call (cheap: clears fields, keeps allocations)
   TheInst->resetForNewCall(Rev);
   return TheInst;
 }
@@ -272,7 +269,7 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
-  // Module lookup: L0 -> L1 -> Cold (shared)
+  // Module lookup: L1 address-based cache -> Cold load
   EVMModule *Mod = findModuleCached(VM, Code, CodeSize, Rev, Msg);
   if (!Mod) {
     VM->ExecHost->reinitialize(PrevInterface, PrevContext);
