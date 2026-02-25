@@ -114,7 +114,10 @@ struct JITSuitabilityResult {
 
 /// Thresholds for JIT suitability fallback.  Normal contracts have <20
 /// RA-expensive ops per block; these values are conservatively high.
-static constexpr size_t MAX_JIT_BYTECODE_SIZE = 0x6000;
+/// Bytecode size limit: 64 KB is well above the EIP-170 deployed-code limit
+/// (24 576) and the EIP-3860 initcode limit (49 152), so real-world contracts
+/// are never affected, while pathological synthetic tests (400 KB+) are caught.
+static constexpr size_t MAX_JIT_BYTECODE_SIZE = 0x10000;
 static constexpr size_t MAX_JIT_MIR_ESTIMATE = 50000;
 static constexpr size_t MAX_CONSECUTIVE_RA_EXPENSIVE = 128;
 static constexpr size_t MAX_BLOCK_RA_EXPENSIVE = 256;
@@ -306,10 +309,14 @@ public:
       BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
     }
 
-    // Compute final fallback verdict
+    // Compute final fallback verdict.
+    // Pattern-based thresholds target pathological LLVM register-allocator
+    // cases (dense RA-expensive opcodes, DUP feedback loops).
+    // The bytecode size guard (64 KB) catches extreme synthetic tests whose
+    // sheer IR volume stalls LLVM, without affecting real contracts (bounded
+    // by EIP-170 / EIP-3860).
     JITResult.ShouldFallback =
-        BytecodeSize > MAX_JIT_BYTECODE_SIZE ||
-        JITResult.MirEstimate > MAX_JIT_MIR_ESTIMATE ||
+        JITResult.BytecodeSize > MAX_JIT_BYTECODE_SIZE ||
         JITResult.MaxConsecutiveExpensive > MAX_CONSECUTIVE_RA_EXPENSIVE ||
         JITResult.MaxBlockExpensiveCount > MAX_BLOCK_RA_EXPENSIVE ||
         JITResult.DupFeedbackPatternCount > MAX_DUP_FEEDBACK_PATTERN;
