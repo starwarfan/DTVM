@@ -59,13 +59,15 @@ def run_benchmark(
     cmd = [
         "./build/bin/evmone-bench",
         benchmark_dir,
-        "--benchmark_filter=external/*",
         f"--benchmark_out={json_out_path}",
         "--benchmark_out_format=json",
     ]
 
     if extra_args:
         cmd.extend(extra_args)
+
+    if not any(arg.startswith("--benchmark_filter") for arg in cmd):
+        cmd.append("--benchmark_filter=external/*")
 
     print(f"Running: {' '.join(cmd)}")
     print(f"Environment: EVMONE_EXTERNAL_OPTIONS={env['EVMONE_EXTERNAL_OPTIONS']}")
@@ -394,11 +396,20 @@ Examples:
         action="store_true",
         help="Verbose output",
     )
+    parser.add_argument(
+        "--benchmark-filter",
+        default=None,
+        help="Custom regex filter forwarded to evmone-bench --benchmark_filter (default: external/*)",
+    )
 
     args = parser.parse_args()
 
     if not args.baseline and not args.save_baseline:
         parser.error("Either --baseline or --save-baseline must be specified")
+
+    bench_extra = None
+    if args.benchmark_filter:
+        bench_extra = [f"--benchmark_filter={args.benchmark_filter}"]
 
     # Run benchmarks
     try:
@@ -406,6 +417,7 @@ Examples:
             lib_path=args.lib,
             mode=args.mode,
             benchmark_dir=args.benchmark_dir,
+            extra_args=bench_extra,
         )
     except Exception as e:
         print(f"::error::Failed to run benchmarks: {e}")

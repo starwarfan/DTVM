@@ -203,12 +203,16 @@ jobs:
           bash .ci/run_test_suite.sh
 
   performance_regression_check:
-    name: Performance Regression Check (10% threshold)
+    name: Performance Regression Check (${{ matrix.mode }}, 10% threshold)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [interpreter, multipass]
     container:
       image: dtvmdev1/dtvm-dev-x64:main
     steps:
@@ -247,8 +251,8 @@ jobs:
           export ENABLE_MULTITHREAD=true
           export TestSuite=benchmarksuite
           export CPU_EXCEPTION_TYPE='cpu'
-          export BENCHMARK_MODE=interpreter
-          export BENCHMARK_SAVE_BASELINE=/tmp/perf_baseline.json
+          export BENCHMARK_MODE=${{ matrix.mode }}
+          export BENCHMARK_SAVE_BASELINE=/tmp/perf_baseline_${{ matrix.mode }}.json
 
           bash .ci/run_test_suite.sh
 
@@ -276,10 +280,10 @@ jobs:
           export ENABLE_MULTITHREAD=true
           export TestSuite=benchmarksuite
           export CPU_EXCEPTION_TYPE='cpu'
-          export BENCHMARK_MODE=interpreter
+          export BENCHMARK_MODE=${{ matrix.mode }}
           export BENCHMARK_THRESHOLD=0.10
-          export BENCHMARK_BASELINE_FILE=/tmp/perf_baseline.json
-          export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary.md
+          export BENCHMARK_BASELINE_FILE=/tmp/perf_baseline_${{ matrix.mode }}.json
+          export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
 
           bash .ci/run_test_suite.sh
         continue-on-error: true
@@ -290,17 +294,18 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const mode = '${{ matrix.mode }}';
             const passed = '${{ steps.perf-check.outcome }}' === 'success';
             let summary = '';
             try {
-              summary = fs.readFileSync('/tmp/perf_summary.md', 'utf8');
+              summary = fs.readFileSync(`/tmp/perf_summary_${mode}.md`, 'utf8');
             } catch (e) {
               summary = '_No benchmark summary available._';
             }
             const icon = passed ? '✅' : '⚠️';
             const title = passed
-              ? 'Performance Check Passed'
-              : 'Performance Regression Detected';
+              ? `Performance Check Passed (${mode})`
+              : `Performance Regression Detected (${mode})`;
             const body = `${icon} **${title}**\n\n${summary}`;
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -312,5 +317,5 @@ jobs:
       - name: Fail on regression
         if: steps.perf-check.outcome == 'failure'
         run: |
-          echo "::error::Performance regression detected. See logs for details."
+          echo "::error::Performance regression detected in ${{ matrix.mode }} mode. See logs for details."
           exit 1
