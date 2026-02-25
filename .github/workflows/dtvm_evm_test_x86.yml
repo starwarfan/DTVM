@@ -209,6 +209,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
     strategy:
       fail-fast: false
       matrix:
