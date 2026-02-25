@@ -2547,6 +2547,8 @@ EVMMirBuilder::handleExtCodeHash(Operand Address) {
 typename EVMMirBuilder::Operand
 EVMMirBuilder::handleBlockHash(Operand BlockNumber) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
+  normalizeOperandU64(BlockNumber, &Non64Value);
   return callRuntimeFor<const uint8_t *, int64_t>(RuntimeFunctions.GetBlockHash,
                                                   BlockNumber);
 }
