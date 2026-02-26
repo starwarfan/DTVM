@@ -2927,9 +2927,9 @@ EVMMirBuilder::handleCreate(Operand ValueOp, Operand OffsetOp, Operand SizeOp) {
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemoryFull();
 #endif
-  auto Result =
-      callRuntimeFor<const uint8_t *, intx::uint128, uint64_t, uint64_t>(
-          RuntimeFunctions.HandleCreate, ValueOp, OffsetOp, SizeOp);
+  auto Result = callRuntimeFor<const uint8_t *, const intx::uint256 &, uint64_t,
+                               uint64_t>(RuntimeFunctions.HandleCreate, ValueOp,
+                                         OffsetOp, SizeOp);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
@@ -2946,7 +2946,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleCreate2(Operand ValueOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemoryFull();
 #endif
-  auto Result = callRuntimeFor<const uint8_t *, intx::uint128, uint64_t,
+  auto Result = callRuntimeFor<const uint8_t *, const intx::uint256 &, uint64_t,
                                uint64_t, const uint8_t *>(
       RuntimeFunctions.HandleCreate2, ValueOp, OffsetOp, SizeOp, SaltOp);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
@@ -2972,7 +2972,7 @@ EVMMirBuilder::handleCall(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
   syncGasToMemoryFull();
 #endif
   auto Result =
-      callRuntimeFor<uint64_t, uint64_t, const uint8_t *, intx::uint128,
+      callRuntimeFor<uint64_t, uint64_t, const uint8_t *, const intx::uint256 &,
                      uint64_t, uint64_t, uint64_t, uint64_t>(
           RuntimeFunctions.HandleCall, GasOp, ToAddrOp, ValueOp, ArgsOffsetOp,
           ArgsSizeOp, RetOffsetOp, RetSizeOp);
@@ -2999,7 +2999,7 @@ EVMMirBuilder::handleCallCode(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
   syncGasToMemoryFull();
 #endif
   auto Result =
-      callRuntimeFor<uint64_t, uint64_t, const uint8_t *, intx::uint128,
+      callRuntimeFor<uint64_t, uint64_t, const uint8_t *, const intx::uint256 &,
                      uint64_t, uint64_t, uint64_t, uint64_t>(
           RuntimeFunctions.HandleCallCode, GasOp, ToAddrOp, ValueOp,
           ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
