@@ -1775,15 +1775,23 @@ EVMMirBuilder::handleCompareGT_LT(const U256Inst &LHS, const U256Inst &RHS,
   MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
   MInstruction *One = createIntConstInstruction(ResultType, 1);
 
-  CmpInstruction::Predicate LTPredicate;
+  CmpInstruction::Predicate SignedPredicate;
+  CmpInstruction::Predicate UnsignedPredicate;
+  bool IsSigned = false;
   if (Operator == CompareOperator::CO_LT) {
-    LTPredicate = CmpInstruction::Predicate::ICMP_ULT;
+    SignedPredicate = CmpInstruction::Predicate::ICMP_ULT;
+    UnsignedPredicate = CmpInstruction::Predicate::ICMP_ULT;
   } else if (Operator == CompareOperator::CO_LT_S) {
-    LTPredicate = CmpInstruction::Predicate::ICMP_SLT;
+    SignedPredicate = CmpInstruction::Predicate::ICMP_SLT;
+    UnsignedPredicate = CmpInstruction::Predicate::ICMP_ULT;
+    IsSigned = true;
   } else if (Operator == CompareOperator::CO_GT) {
-    LTPredicate = CmpInstruction::Predicate::ICMP_UGT;
+    SignedPredicate = CmpInstruction::Predicate::ICMP_UGT;
+    UnsignedPredicate = CmpInstruction::Predicate::ICMP_UGT;
   } else if (Operator == CompareOperator::CO_GT_S) {
-    LTPredicate = CmpInstruction::Predicate::ICMP_SGT;
+    SignedPredicate = CmpInstruction::Predicate::ICMP_SGT;
+    UnsignedPredicate = CmpInstruction::Predicate::ICMP_UGT;
+    IsSigned = true;
   } else {
     ZEN_ASSERT_TODO();
   }
@@ -1795,8 +1803,13 @@ EVMMirBuilder::handleCompareGT_LT(const U256Inst &LHS, const U256Inst &RHS,
   for (int I = EVM_ELEMENTS_COUNT - 1; I >= 0; --I) {
     ZEN_ASSERT(LHS[I] && RHS[I]);
 
+    // For signed 256-bit comparison, only the most significant component
+    // carries the sign bit; lower components are magnitude-only and must
+    // use unsigned comparison.
+    auto Pred = (IsSigned && I == EVM_ELEMENTS_COUNT - 1) ? SignedPredicate
+                                                          : UnsignedPredicate;
     MInstruction *CompResult = createInstruction<CmpInstruction>(
-        false, LTPredicate, ResultType, LHS[I], RHS[I]);
+        false, Pred, ResultType, LHS[I], RHS[I]);
     MInstruction *EqResult = createInstruction<CmpInstruction>(
         false, EQPredicate, ResultType, LHS[I], RHS[I]);
 
