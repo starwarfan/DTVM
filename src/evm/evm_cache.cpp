@@ -849,6 +849,16 @@ static bool buildLoopsUsingDominance(
   return true;
 }
 
+// Effective predecessor count: the entry block (Start == 0) is always reachable
+// from the program start, adding an implicit path not represented in the CFG.
+static size_t effectivePredCount(const GasBlock &Block) {
+  size_t Count = Block.Preds.size();
+  if (Block.Start == 0) {
+    ++Count;
+  }
+  return Count;
+}
+
 // Lemma 6.14 Update: move minimum successor cost to current node
 static bool lemma614Update(uint32_t NodeId, const std::vector<GasBlock> &Blocks,
                            const std::vector<std::vector<uint32_t>> *BackEdges,
@@ -867,10 +877,8 @@ static bool lemma614Update(uint32_t NodeId, const std::vector<GasBlock> &Blocks,
     if (AllowedMask && !bitsetTest(*AllowedMask, Succ)) {
       continue;
     }
-    // Only consider successors with exactly one predecessor. If a successor has
-    // multiple predecessors, we cannot move its gas to this node because
-    // different execution paths may reach it from different predecessors.
-    if (Blocks[Succ].Preds.size() != 1) {
+    // Only consider successors with exactly one effective predecessor.
+    if (effectivePredCount(Blocks[Succ]) != 1) {
       continue;
     }
     MinSucc = std::min(MinSucc, Metering[Succ]);
@@ -888,8 +896,7 @@ static bool lemma614Update(uint32_t NodeId, const std::vector<GasBlock> &Blocks,
     if (AllowedMask && !bitsetTest(*AllowedMask, Succ)) {
       continue;
     }
-    // Only subtract from successors with exactly one predecessor
-    if (Blocks[Succ].Preds.size() != 1) {
+    if (effectivePredCount(Blocks[Succ]) != 1) {
       continue;
     }
     Metering[Succ] -= MinSucc;
