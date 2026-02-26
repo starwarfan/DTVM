@@ -596,7 +596,7 @@ private:
             Ip++;
             PC++;
           }
-          if (PC > RunStartPC) {
+          if (PC > RunStartPC && !InDeadCode) {
             Builder.meterOpcodeRange(RunStartPC, PC);
           }
           handleEndBlock();
