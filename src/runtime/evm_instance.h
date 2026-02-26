@@ -11,6 +11,7 @@
 #include "runtime/evm_module.h"
 #include "runtime/instance.h"
 #include <array>
+#include <deque>
 #include <limits>
 #include <memory>
 
@@ -141,8 +142,8 @@ public:
     std::unordered_map<std::pair<const evmc_message *, uint64_t>, evmc::bytes32,
                        PairHash>
         CalldataLoads;
-    std::vector<evmc::bytes32> ExtcodeHashes;
-    std::vector<evmc::bytes32> Keccak256Results;
+    std::deque<evmc::bytes32> ExtcodeHashes;
+    std::deque<evmc::bytes32> Keccak256Results;
     bool TxContextCached = false;
   };
 
