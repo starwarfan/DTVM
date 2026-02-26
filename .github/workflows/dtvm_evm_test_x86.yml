@@ -289,9 +289,45 @@ jobs:
           bash .ci/run_test_suite.sh
         continue-on-error: true
 
+      - name: Write Performance Summary
+        if: always()
+        run: |
+          MODE="${{ matrix.mode }}"
+          OUTCOME="${{ steps.perf-check.outcome }}"
+          SUMMARY_FILE="/tmp/perf_summary_${MODE}.md"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "✅ **Performance Check Passed (${MODE})**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Performance Regression Detected (${MODE})**" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "$SUMMARY_FILE" ]; then
+            cat "$SUMMARY_FILE" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No benchmark summary available._" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Save performance artifacts
+        if: always()
+        run: |
+          mkdir -p /tmp/perf-artifacts
+          echo "${{ github.event.pull_request.number }}" > /tmp/perf-artifacts/pr_number
+          echo "${{ steps.perf-check.outcome }}" > /tmp/perf-artifacts/outcome
+          cp "/tmp/perf_summary_${{ matrix.mode }}.md" /tmp/perf-artifacts/summary.md 2>/dev/null || \
+            echo "_No benchmark summary available._" > /tmp/perf-artifacts/summary.md
+
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results-${{ matrix.mode }}
+          path: /tmp/perf-artifacts/
+          retention-days: 7
+
       - name: Comment on PR
         if: always()
         uses: actions/github-script@v6
+        continue-on-error: true
         with:
           script: |
             const fs = require('fs');
@@ -308,12 +344,16 @@ jobs:
               ? `Performance Check Passed (${mode})`
               : `Performance Regression Detected (${mode})`;
             const body = `${icon} **${title}**\n\n${summary}`;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            } catch (error) {
+              core.warning(`Could not comment on PR (expected for fork PRs): ${error.message}. Results are available in the job summary above.`);
+            }
 
       - name: Fail on regression
         if: steps.perf-check.outcome == 'failure'
