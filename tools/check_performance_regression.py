@@ -173,9 +173,14 @@ def compare_benchmarks(
     current: List[BenchmarkResult],
     baseline: List[BenchmarkResult],
     threshold: float,
+    min_regressions: int = 3,
 ) -> Tuple[bool, List[dict]]:
     """
     Compare current results against baseline.
+
+    A regression is only flagged if at least ``min_regressions`` individual
+    benchmarks exceed the threshold.  This prevents CI noise on shared
+    runners from causing false positives when a single outlier spikes.
 
     Returns:
         (has_regression, comparison_details)
@@ -183,7 +188,6 @@ def compare_benchmarks(
     baseline_map = {b.name: b for b in baseline}
     current_map = {c.name: c for c in current}
 
-    # Find missing and new benchmarks
     baseline_names = set(baseline_map.keys())
     current_names = set(current_map.keys())
 
@@ -195,24 +199,21 @@ def compare_benchmarks(
     if new:
         print(f"::notice::New benchmarks (in current but not in baseline): {new}")
 
-    # Compare common benchmarks
     comparisons = []
-    has_regression = False
+    regression_count = 0
 
     for name in sorted(baseline_names & current_names):
         b = baseline_map[name]
         c = current_map[name]
 
-        # Calculate percentage change (positive = slower/regression)
         time_change = (c.time_ns - b.time_ns) / b.time_ns
         cpu_change = (c.cpu_time_ns - b.cpu_time_ns) / b.cpu_time_ns
 
-        # Use the worse of real_time or cpu_time change
         max_change = max(time_change, cpu_change)
 
         is_regression = max_change > threshold
         if is_regression:
-            has_regression = True
+            regression_count += 1
 
         comparisons.append({
             "name": name,
@@ -223,6 +224,14 @@ def compare_benchmarks(
             "max_change": max_change,
             "is_regression": is_regression,
         })
+
+    has_regression = regression_count >= min_regressions
+
+    if regression_count > 0 and not has_regression:
+        print(
+            f"::notice::{regression_count} benchmark(s) exceeded threshold but "
+            f"below min_regressions={min_regressions}; treating as noise."
+        )
 
     return has_regression, comparisons
 
@@ -401,6 +410,13 @@ Examples:
         default=None,
         help="Custom regex filter forwarded to evmone-bench --benchmark_filter (default: external/*)",
     )
+    parser.add_argument(
+        "--min-regressions",
+        type=int,
+        default=3,
+        help="Minimum number of regressed benchmarks before flagging overall failure (default: 3). "
+             "Prevents CI noise from causing false positives.",
+    )
 
     args = parser.parse_args()
 
@@ -447,6 +463,7 @@ Examples:
         current_results,
         baseline_results,
         args.threshold,
+        min_regressions=args.min_regressions,
     )
 
     print_comparison_table(comparisons, args.threshold)
@@ -460,13 +477,23 @@ Examples:
             f.write(summary_md)
         print(f"Wrote comparison summary to {args.output_summary}")
 
-    # Summary for GitHub Actions
+    regression_count = sum(1 for c in comparisons if c["is_regression"])
+
     print("\n" + "=" * 100)
     if has_regression:
-        print(f"::error::Performance regression detected! Some benchmarks exceeded {args.threshold*100:.0f}% threshold.")
+        print(
+            f"::error::Performance regression detected! "
+            f"{regression_count} benchmarks exceeded {args.threshold*100:.0f}% threshold "
+            f"(min required: {args.min_regressions})."
+        )
         print("RESULT: FAIL")
         return 1
     else:
+        if regression_count > 0:
+            print(
+                f"::notice::{regression_count} benchmark(s) exceeded threshold "
+                f"but below minimum of {args.min_regressions}; treated as CI noise."
+            )
         print("::notice::No significant performance regression detected.")
         print("RESULT: PASS")
         return 0

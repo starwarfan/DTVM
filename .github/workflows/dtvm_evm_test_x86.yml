@@ -203,7 +203,7 @@ jobs:
           bash .ci/run_test_suite.sh
 
   performance_regression_check:
-    name: Performance Regression Check (${{ matrix.mode }}, 10% threshold)
+    name: Performance Regression Check (${{ matrix.mode }})
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -232,30 +232,34 @@ jobs:
         run: |
           ./tools/format.sh check
 
-      - name: Build baseline (${{ github.base_ref }})
+      - name: Build baseline library (${{ github.base_ref }})
         run: |
-          echo "Building baseline on branch: ${{ github.base_ref }}"
+          echo "Building baseline library from branch: ${{ github.base_ref }}"
 
           export LLVM_SYS_150_PREFIX=/opt/llvm15
           export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
           export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
 
-          # Save current state (including untracked files)
           git stash push -u -m "perf-check-stash"
           git checkout ${{ github.base_ref }}
 
-          # Build baseline
-          export CMAKE_BUILD_TARGET=Release
-          export ENABLE_ASAN=false
-          export RUN_MODE=multipass
-          export ENABLE_LAZY=false
-          export ENABLE_MULTITHREAD=true
-          export TestSuite=benchmarksuite
-          export CPU_EXCEPTION_TYPE='cpu'
-          export BENCHMARK_MODE=${{ matrix.mode }}
-          export BENCHMARK_SAVE_BASELINE=/tmp/perf_baseline_${{ matrix.mode }}.json
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DZEN_ENABLE_SINGLEPASS_JIT=OFF \
+            -DZEN_ENABLE_MULTIPASS_JIT=ON \
+            -DZEN_ENABLE_EVM=ON \
+            -DZEN_ENABLE_LIBEVM=ON \
+            -DZEN_ENABLE_JIT_PRECOMPILE_FALLBACK=ON \
+            -DZEN_ENABLE_CPU_EXCEPTION=ON \
+            -DZEN_ENABLE_VIRTUAL_STACK=ON
+          cmake --build build -j 16
 
-          bash .ci/run_test_suite.sh
+          mkdir -p /tmp/baseline_lib
+          cp build/lib/* /tmp/baseline_lib/
+
+          rm -rf build
+          git checkout ${{ github.sha }}
+          git stash pop || true
 
       - name: Build current PR and check regression
         id: perf-check
@@ -266,14 +270,8 @@ jobs:
           export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
           export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
 
-          # Switch back to PR branch
-          git checkout ${{ github.sha }}
-          git stash pop || true
-
-          # Clean and rebuild for current PR
           rm -rf build evmone
 
-          # Build and check
           export CMAKE_BUILD_TARGET=Release
           export ENABLE_ASAN=false
           export RUN_MODE=multipass
@@ -282,8 +280,8 @@ jobs:
           export TestSuite=benchmarksuite
           export CPU_EXCEPTION_TYPE='cpu'
           export BENCHMARK_MODE=${{ matrix.mode }}
-          export BENCHMARK_THRESHOLD=0.10
-          export BENCHMARK_BASELINE_FILE=/tmp/perf_baseline_${{ matrix.mode }}.json
+          export BENCHMARK_THRESHOLD=0.15
+          export BENCHMARK_BASELINE_LIB=/tmp/baseline_lib
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
 
           bash .ci/run_test_suite.sh

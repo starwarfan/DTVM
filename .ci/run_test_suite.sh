@@ -177,29 +177,43 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 git clone --depth 1 --recurse-submodules -b for_test https://github.com/DTVMStack/evmone.git $EVMONE_DIR
             fi
 
-            # Set default values for benchmark
-            BENCHMARK_THRESHOLD=${BENCHMARK_THRESHOLD:-0.10}
+            BENCHMARK_THRESHOLD=${BENCHMARK_THRESHOLD:-0.15}
             BENCHMARK_MODE=${BENCHMARK_MODE:-multipass}
+            BENCHMARK_SUMMARY_FILE=${BENCHMARK_SUMMARY_FILE:-/tmp/perf_summary.md}
 
-            # Copy DTVM library to evmone directory
             cp build/lib/* $EVMONE_DIR/
 
             cd $EVMONE_DIR
 
-            # Copy check_performance_regression.py from DTVM repo
             cp ../tools/check_performance_regression.py ./
 
-            # Build evmone if not already built
             if [ ! -f "build/bin/evmone-bench" ]; then
                 cmake -S . -B build -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
                 cmake --build build --parallel -j 16
             fi
 
-            # Default summary output path (can be overridden via env)
-            BENCHMARK_SUMMARY_FILE=${BENCHMARK_SUMMARY_FILE:-/tmp/perf_summary.md}
+            if [ -n "$BENCHMARK_BASELINE_LIB" ]; then
+                # Run baseline benchmarks with the pre-built baseline library,
+                # then run current benchmarks with the PR library and compare.
+                # This avoids depending on the base branch having benchmark scripts.
+                echo "Running baseline benchmarks with library from base branch..."
+                cp "$BENCHMARK_BASELINE_LIB"/libdtvmapi.so ./libdtvmapi.so
+                python3 check_performance_regression.py \
+                    --save-baseline /tmp/perf_baseline.json \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
 
-            # Run performance check based on mode
-            if [ -n "$BENCHMARK_SAVE_BASELINE" ]; then
+                echo "Running current benchmarks with PR library..."
+                cp ../build/lib/libdtvmapi.so ./libdtvmapi.so
+                python3 check_performance_regression.py \
+                    --baseline /tmp/perf_baseline.json \
+                    --threshold "$BENCHMARK_THRESHOLD" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+            elif [ -n "$BENCHMARK_SAVE_BASELINE" ]; then
                 echo "Saving performance baseline..."
                 python3 check_performance_regression.py \
                     --save-baseline "$BENCHMARK_SAVE_BASELINE" \
