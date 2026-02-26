@@ -60,6 +60,42 @@ EVMInstanceUniquePtr EVMInstance::newEVMInstance(Isolation &Iso,
 
 EVMInstance::~EVMInstance() {}
 
+void EVMInstance::resetForNewCall(evmc_revision NewRev) {
+  // Reset gas accounting
+  Gas = 0;
+  GasRefund = 0;
+  Rev = NewRev;
+  InstanceExitCode = 0;
+  Err = common::ErrorCode::NoError;
+
+  // Reset message stack (clear but keep capacity)
+  CurrentMessage = nullptr;
+  MessageStack.clear();
+  GasRefundStack.clear();
+
+  // Reset memory: keep the 16MB allocation, just reset the size
+  MemoryBase = nullptr;
+  MemorySize = 0;
+  // Don't release Memory - reuse the allocation on next pushMessage()
+  MemoryStack.clear();
+
+  // Reset output
+  ReturnData.clear();
+  ExeResult = evmc::Result{EVMC_SUCCESS, 0, 0};
+
+  // Reset execution cache: clear() keeps allocated bucket arrays,
+  // avoiding repeated alloc/free of unordered_map internals.
+  InstanceExecutionCache.BlockHashes.clear();
+  InstanceExecutionCache.BlobHashes.clear();
+  InstanceExecutionCache.CalldataLoads.clear();
+  InstanceExecutionCache.ExtcodeHashes.clear();
+  InstanceExecutionCache.Keccak256Results.clear();
+  InstanceExecutionCache.TxContextCached = false;
+
+  // Reset JIT stack
+  EVMStackSize = 0;
+}
+
 void EVMInstance::setGas(uint64_t NewGas) { Gas = NewGas; }
 
 void EVMInstance::pushMessage(evmc_message *Msg) {

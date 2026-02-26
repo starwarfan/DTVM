@@ -10,7 +10,6 @@
 #include "intx/intx.hpp"
 
 #include <array>
-#include <deque>
 #include <vector>
 
 namespace zen {
@@ -70,7 +69,7 @@ struct EVMFrame {
 class InterpreterExecContext {
 private:
   runtime::EVMInstance *Inst;
-  std::deque<EVMFrame> FrameStack;
+  std::vector<EVMFrame> FrameStack;
   evmc_status_code Status = EVMC_SUCCESS;
   std::vector<uint8_t> ReturnData;
   evmc::Result ExeResult;
@@ -79,6 +78,17 @@ public:
   bool IsJump = false;
 
   InterpreterExecContext(runtime::EVMInstance *Inst) : Inst(Inst) {}
+
+  /// Reset state for reuse across calls. Keeps allocated capacity to avoid
+  /// re-allocating the ~32KB EVMFrame on every call.
+  void resetForNewCall(runtime::EVMInstance *NewInst) {
+    Inst = NewInst;
+    FrameStack.clear(); // keeps vector capacity
+    Status = EVMC_SUCCESS;
+    ReturnData.clear(); // keeps vector capacity
+    IsJump = false;
+    ExeResult = evmc::Result{EVMC_SUCCESS, 0, 0};
+  }
 
   EVMFrame *allocTopFrame(evmc_message *Msg);
   void freeBackFrame();
