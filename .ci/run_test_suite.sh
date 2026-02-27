@@ -192,14 +192,26 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 cmake --build build --parallel -j 16
             fi
 
-            if [ -n "$BENCHMARK_BASELINE_LIB" ]; then
-                # Run baseline benchmarks with the pre-built baseline library,
-                # then run current benchmarks with the PR library and compare.
-                # This avoids depending on the base branch having benchmark scripts.
+            BASELINE_CACHE=${BENCHMARK_BASELINE_CACHE:-}
+
+            if [ -n "$BASELINE_CACHE" ] && [ -f "$BASELINE_CACHE" ]; then
+                # Cached baseline available -- only run current benchmarks.
+                echo "Using cached baseline: $BASELINE_CACHE"
+                python3 check_performance_regression.py \
+                    --baseline "$BASELINE_CACHE" \
+                    --threshold "$BENCHMARK_THRESHOLD" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+            elif [ -n "$BENCHMARK_BASELINE_LIB" ]; then
+                # No cache -- run baseline benchmarks with the pre-built
+                # baseline library, then run current benchmarks and compare.
                 echo "Running baseline benchmarks with library from base branch..."
                 cp "$BENCHMARK_BASELINE_LIB"/libdtvmapi.so ./libdtvmapi.so
+                SAVE_PATH=${BASELINE_CACHE:-/tmp/perf_baseline.json}
                 python3 check_performance_regression.py \
-                    --save-baseline /tmp/perf_baseline.json \
+                    --save-baseline "$SAVE_PATH" \
                     --lib ./libdtvmapi.so \
                     --mode "$BENCHMARK_MODE" \
                     --benchmark-dir test/evm-benchmarks/benchmarks
@@ -207,7 +219,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 echo "Running current benchmarks with PR library..."
                 cp ../build/lib/libdtvmapi.so ./libdtvmapi.so
                 python3 check_performance_regression.py \
-                    --baseline /tmp/perf_baseline.json \
+                    --baseline "$SAVE_PATH" \
                     --threshold "$BENCHMARK_THRESHOLD" \
                     --output-summary "$BENCHMARK_SUMMARY_FILE" \
                     --lib ./libdtvmapi.so \

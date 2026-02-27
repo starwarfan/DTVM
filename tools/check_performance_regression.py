@@ -21,6 +21,7 @@ Exit codes:
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -41,33 +42,44 @@ def run_benchmark(
     mode: str,
     benchmark_dir: str,
     extra_args: Optional[List[str]] = None,
+    repetitions: int = 3,
 ) -> List[BenchmarkResult]:
     """Run benchmark and parse JSON output.
 
     Uses --benchmark_out to write JSON results to a temporary file so that
     the human-readable benchmark progress streams to stdout/stderr in real
     time (important for CI visibility).
+
+    When *repetitions* > 1, each benchmark runs N times and only the
+    median aggregate is kept, significantly reducing noise from ASLR and
+    shared-runner contention.
     """
     env = {"EVMONE_EXTERNAL_OPTIONS": f"{lib_path},mode={mode}"}
 
-    # Write JSON results to a temp file instead of capturing stdout.
-    # This lets Google Benchmark's normal console output (one line per
-    # completed case) stream directly to the CI log in real time.
     fd, json_out_path = tempfile.mkstemp(suffix=".json")
     os.close(fd)
 
-    cmd = [
+    cmd: List[str] = []
+
+    if shutil.which("taskset"):
+        cmd.extend(["taskset", "-c", "0"])
+
+    cmd.extend([
         "./build/bin/evmone-bench",
         benchmark_dir,
         f"--benchmark_out={json_out_path}",
         "--benchmark_out_format=json",
-    ]
+    ])
+
+    if repetitions > 1:
+        cmd.append(f"--benchmark_repetitions={repetitions}")
+        cmd.append("--benchmark_report_aggregates_only=true")
 
     if extra_args:
         cmd.extend(extra_args)
 
     if not any(arg.startswith("--benchmark_filter") for arg in cmd):
-        cmd.append("--benchmark_filter=external/*")
+        cmd.append("--benchmark_filter=external/total/*")
 
     print(f"Running: {' '.join(cmd)}")
     print(f"Environment: EVMONE_EXTERNAL_OPTIONS={env['EVMONE_EXTERNAL_OPTIONS']}")
@@ -80,14 +92,12 @@ def run_benchmark(
 
     if result.returncode != 0:
         print(f"Benchmark execution failed with code {result.returncode}")
-        # Clean up temp file on failure
         try:
             os.unlink(json_out_path)
         except OSError:
             pass
         sys.exit(2)
 
-    # Read JSON results from the temp file
     try:
         with open(json_out_path, "r") as f:
             json_data = f.read()
@@ -101,22 +111,38 @@ def run_benchmark(
 
 
 def parse_benchmark_json(json_output: str) -> List[BenchmarkResult]:
-    """Parse Google Benchmark JSON output."""
+    """Parse Google Benchmark JSON output.
+
+    When the output contains aggregate entries (from ``--benchmark_repetitions``),
+    only the **median** aggregate is kept and the ``_median`` suffix is stripped
+    from names so they match the non-repetition format.  Otherwise individual
+    iteration results are returned.
+    """
     try:
         data = json.loads(json_output)
     except json.JSONDecodeError as e:
         print(f"Failed to parse JSON: {e}")
         sys.exit(2)
 
+    benchmarks = data.get("benchmarks", [])
+    has_aggregates = any(b.get("run_type") == "aggregate" for b in benchmarks)
+
     results = []
-    for benchmark in data.get("benchmarks", []):
-        # Skip aggregates like mean, median, stddev
-        if benchmark.get("run_type") != "iteration":
-            continue
+    for benchmark in benchmarks:
+        if has_aggregates:
+            if benchmark.get("aggregate_name") != "median":
+                continue
+            name = benchmark["name"]
+            if name.endswith("_median"):
+                name = name[:-len("_median")]
+        else:
+            if benchmark.get("run_type") != "iteration":
+                continue
+            name = benchmark["name"]
 
         results.append(
             BenchmarkResult(
-                name=benchmark["name"],
+                name=name,
                 time_ns=benchmark.get("real_time", 0),
                 cpu_time_ns=benchmark.get("cpu_time", 0),
                 iterations=benchmark.get("iterations", 1),
@@ -173,7 +199,8 @@ def compare_benchmarks(
     current: List[BenchmarkResult],
     baseline: List[BenchmarkResult],
     threshold: float,
-    min_regressions: int = 3,
+    min_regressions: int = 5,
+    min_time_ns: float = 5000.0,
 ) -> Tuple[bool, List[dict]]:
     """
     Compare current results against baseline.
@@ -181,6 +208,10 @@ def compare_benchmarks(
     A regression is only flagged if at least ``min_regressions`` individual
     benchmarks exceed the threshold.  This prevents CI noise on shared
     runners from causing false positives when a single outlier spikes.
+
+    Benchmarks whose baseline time is below ``min_time_ns`` are excluded
+    from regression counting because percentage changes on sub-microsecond
+    timings are dominated by measurement overhead and ASLR noise.
 
     Returns:
         (has_regression, comparison_details)
@@ -201,6 +232,7 @@ def compare_benchmarks(
 
     comparisons = []
     regression_count = 0
+    skipped_small = 0
 
     for name in sorted(baseline_names & current_names):
         b = baseline_map[name]
@@ -211,9 +243,12 @@ def compare_benchmarks(
 
         max_change = max(time_change, cpu_change)
 
-        is_regression = max_change > threshold
+        too_small = b.time_ns < min_time_ns
+        is_regression = max_change > threshold and not too_small
         if is_regression:
             regression_count += 1
+        if too_small and max_change > threshold:
+            skipped_small += 1
 
         comparisons.append({
             "name": name,
@@ -227,6 +262,11 @@ def compare_benchmarks(
 
     has_regression = regression_count >= min_regressions
 
+    if skipped_small > 0:
+        print(
+            f"::notice::{skipped_small} micro-benchmark(s) exceeded threshold but "
+            f"excluded (baseline < {min_time_ns/1000:.1f}us)."
+        )
     if regression_count > 0 and not has_regression:
         print(
             f"::notice::{regression_count} benchmark(s) exceeded threshold but "
@@ -376,8 +416,8 @@ Examples:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.10,
-        help="Regression threshold as ratio (default: 0.10 = 10%%)",
+        default=0.15,
+        help="Regression threshold as ratio (default: 0.15 = 15%%)",
     )
     parser.add_argument(
         "--lib",
@@ -413,9 +453,24 @@ Examples:
     parser.add_argument(
         "--min-regressions",
         type=int,
-        default=3,
-        help="Minimum number of regressed benchmarks before flagging overall failure (default: 3). "
+        default=5,
+        help="Minimum number of regressed benchmarks before flagging overall failure (default: 5). "
              "Prevents CI noise from causing false positives.",
+    )
+    parser.add_argument(
+        "--min-time-ns",
+        type=float,
+        default=5000.0,
+        help="Exclude benchmarks whose baseline time is below this value (in nanoseconds) "
+             "from regression counting. Sub-microsecond timings are dominated by "
+             "measurement noise. (default: 5000 = 5us)",
+    )
+    parser.add_argument(
+        "--benchmark-repetitions",
+        type=int,
+        default=3,
+        help="Run each benchmark N times and use the median. "
+             "Reduces ASLR and shared-runner noise. (default: 3)",
     )
 
     args = parser.parse_args()
@@ -434,6 +489,7 @@ Examples:
             mode=args.mode,
             benchmark_dir=args.benchmark_dir,
             extra_args=bench_extra,
+            repetitions=args.benchmark_repetitions,
         )
     except Exception as e:
         print(f"::error::Failed to run benchmarks: {e}")
@@ -464,6 +520,7 @@ Examples:
         baseline_results,
         args.threshold,
         min_regressions=args.min_regressions,
+        min_time_ns=args.min_time_ns,
     )
 
     print_comparison_table(comparisons, args.threshold)

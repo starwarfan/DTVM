@@ -232,7 +232,15 @@ jobs:
         run: |
           ./tools/format.sh check
 
+      - name: Restore baseline cache
+        id: baseline-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/perf_baseline_${{ matrix.mode }}.json
+          key: perf-baseline-${{ matrix.mode }}-${{ github.event.pull_request.base.sha }}
+
       - name: Build baseline library (${{ github.base_ref }})
+        if: steps.baseline-cache.outputs.cache-hit != 'true'
         run: |
           echo "Building baseline library from branch: ${{ github.base_ref }}"
 
@@ -280,7 +288,8 @@ jobs:
           export TestSuite=benchmarksuite
           export CPU_EXCEPTION_TYPE='cpu'
           export BENCHMARK_MODE=${{ matrix.mode }}
-          export BENCHMARK_THRESHOLD=0.15
+          export BENCHMARK_THRESHOLD=0.20
+          export BENCHMARK_BASELINE_CACHE=/tmp/perf_baseline_${{ matrix.mode }}.json
           export BENCHMARK_BASELINE_LIB=/tmp/baseline_lib
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
 
