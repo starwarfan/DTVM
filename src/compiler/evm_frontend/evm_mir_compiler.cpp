@@ -186,9 +186,27 @@ MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB() {
         continue;
       }
       if (JumpHashTable[HashEntry].size() == 1) {
-        // JumpDest BB for no-conflict hash index
-        HashCases[HIndex].second = JumpHashTable[HashEntry][0];
-        addSuccessor(JumpHashTable[HashEntry][0]);
+        // Even for single-entry hash buckets, we must explicitly verify that
+        // the requested jump target matches the expected PC. Otherwise, any
+        // invalid PC that collides with this hash bucket would wrongly jump to
+        // this destination.
+        MBasicBlock *OutsideBB = CurBB;
+        MBasicBlock *CheckBB = createBasicBlock();
+        CheckBB->setJumpDestBB(true);
+        setInsertBlock(CheckBB);
+        MInstruction *ExpectedPC = createIntConstInstruction(
+            UInt64Type, JumpHashReverse[HashEntry][0]);
+        MInstruction *IsMatch = createInstruction<CmpInstruction>(
+            false, CmpInstruction::Predicate::ICMP_EQ, &Ctx.I64Type, JumpTarget,
+            ExpectedPC);
+        MBasicBlock *DestBB = JumpHashTable[HashEntry][0];
+        createInstruction<BrIfInstruction>(true, Ctx, IsMatch, DestBB,
+                                           FailureBB);
+        addSuccessor(DestBB);
+        addUniqueSuccessor(FailureBB);
+        setInsertBlock(OutsideBB);
+        HashCases[HIndex].second = CheckBB;
+        addSuccessor(CheckBB);
       } else {
         // Create switch for conflict hash items
         MBasicBlock *OutsideBB = CurBB;
