@@ -1110,7 +1110,7 @@ static bool buildGasChunksSPP(const zen::common::Byte *Code, size_t CodeSize,
       continue;
     }
     GasChunkEnd[Blocks[Id].Start] = Blocks[Id].End;
-    GasChunkCost[Blocks[Id].Start] = Metering[Id];
+    GasChunkCost[Blocks[Id].Start] = Blocks[Id].Cost;
   }
 
   return true;
