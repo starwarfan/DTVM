@@ -2701,8 +2701,7 @@ EVMMirBuilder::handleMLoad(Operand AddrComponents) {
   // *new* contents instead of the value at the time of the MLOAD.
   U256Inst Parts = extractU256Operand(Result);
   for (int I = 0; I < static_cast<int>(EVM_ELEMENTS_COUNT); ++I) {
-    Variable *Tmp = storeInstructionInTemp(Parts[I], I64Type);
-    Parts[I] = loadVariable(Tmp);
+    Parts[I] = protectUnsafeValue(Parts[I], I64Type);
   }
   Result = Operand(Parts, EVMType::UINT256);
 
