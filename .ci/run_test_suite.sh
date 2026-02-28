@@ -77,6 +77,9 @@ case $TestSuite in
     "evmfallbacksuite")
         CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_SPEC_TEST=ON -DZEN_ENABLE_ASSEMBLYSCRIPT_TEST=ON -DZEN_ENABLE_EVM=ON -DZEN_ENABLE_LIBEVM=ON -DZEN_ENABLE_JIT_FALLBACK_TEST=ON"
         ;;
+    "benchmarksuite")
+        CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_EVM=ON -DZEN_ENABLE_LIBEVM=ON -DZEN_ENABLE_SINGLEPASS_JIT=OFF -DZEN_ENABLE_MULTIPASS_JIT=ON -DZEN_ENABLE_JIT_PRECOMPILE_FALLBACK=ON"
+        ;;
 esac
 
 case $CPU_EXCEPTION_TYPE in
@@ -94,6 +97,10 @@ if [[ $RUN_MODE == "interpreter" ]]; then
 fi
 
 if [[ $TestSuite == "evmonetestsuite" ]]; then
+    STACK_TYPES=("-DZEN_ENABLE_VIRTUAL_STACK=ON")
+fi
+
+if [[ $TestSuite == "benchmarksuite" ]]; then
     STACK_TYPES=("-DZEN_ENABLE_VIRTUAL_STACK=ON")
 fi
 
@@ -162,6 +169,91 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
         "evmfallbacksuite")
             python3 tools/run_evm_tests.py -r build/dtvm $EXTRA_EXE_OPTIONS
             ./build/evmFallbackExecutionTests
+            ;;
+        "benchmarksuite")
+            # Clone evmone and run performance regression check
+            EVMONE_DIR="evmone"
+            if [ ! -d "$EVMONE_DIR" ]; then
+                git clone --depth 1 --recurse-submodules -b for_test https://github.com/DTVMStack/evmone.git $EVMONE_DIR
+            fi
+
+            BENCHMARK_THRESHOLD=${BENCHMARK_THRESHOLD:-0.15}
+            BENCHMARK_MODE=${BENCHMARK_MODE:-multipass}
+            BENCHMARK_SUMMARY_FILE=${BENCHMARK_SUMMARY_FILE:-/tmp/perf_summary.md}
+
+            cp build/lib/* $EVMONE_DIR/
+
+            cd $EVMONE_DIR
+
+            cp ../tools/check_performance_regression.py ./
+
+            if [ ! -f "build/bin/evmone-bench" ]; then
+                cmake -S . -B build -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+                cmake --build build --parallel -j 16
+            fi
+
+            BASELINE_CACHE=${BENCHMARK_BASELINE_CACHE:-}
+
+            if [ -n "$BASELINE_CACHE" ] && [ -f "$BASELINE_CACHE" ]; then
+                # Cached baseline available -- only run current benchmarks.
+                echo "Using cached baseline: $BASELINE_CACHE"
+                python3 check_performance_regression.py \
+                    --baseline "$BASELINE_CACHE" \
+                    --threshold "$BENCHMARK_THRESHOLD" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+            elif [ -n "$BENCHMARK_BASELINE_LIB" ]; then
+                # No cache -- run baseline benchmarks with the pre-built
+                # baseline library, then run current benchmarks and compare.
+                echo "Running baseline benchmarks with library from base branch..."
+                cp "$BENCHMARK_BASELINE_LIB"/libdtvmapi.so ./libdtvmapi.so
+                SAVE_PATH=${BASELINE_CACHE:-/tmp/perf_baseline.json}
+                python3 check_performance_regression.py \
+                    --save-baseline "$SAVE_PATH" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+
+                echo "Running current benchmarks with PR library..."
+                cp ../build/lib/libdtvmapi.so ./libdtvmapi.so
+                python3 check_performance_regression.py \
+                    --baseline "$SAVE_PATH" \
+                    --threshold "$BENCHMARK_THRESHOLD" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+            elif [ -n "$BENCHMARK_SAVE_BASELINE" ]; then
+                echo "Saving performance baseline..."
+                python3 check_performance_regression.py \
+                    --save-baseline "$BENCHMARK_SAVE_BASELINE" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+            elif [ -n "$BENCHMARK_BASELINE_FILE" ]; then
+                echo "Checking performance regression against baseline..."
+                python3 check_performance_regression.py \
+                    --baseline "$BENCHMARK_BASELINE_FILE" \
+                    --threshold "$BENCHMARK_THRESHOLD" \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+            else
+                echo "Running benchmark suite without comparison..."
+                python3 check_performance_regression.py \
+                    --save-baseline benchmark_results.json \
+                    --output-summary "$BENCHMARK_SUMMARY_FILE" \
+                    --lib ./libdtvmapi.so \
+                    --mode "$BENCHMARK_MODE" \
+                    --benchmark-dir test/evm-benchmarks/benchmarks
+                cat benchmark_results.json
+            fi
+
+            cd ..
             ;;
     esac
 done
