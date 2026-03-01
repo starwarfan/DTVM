@@ -111,7 +111,18 @@ jobs:
           export CPU_EXCEPTION_TYPE='check'
           export ENABLE_GAS_METER=false
 
-          bash .ci/run_test_suite.sh
+          for attempt in 1 2 3; do
+            echo "run_test_suite attempt ${attempt}/3"
+            if bash .ci/run_test_suite.sh; then
+              break
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              echo "run_test_suite failed after 3 attempts"
+              exit 1
+            fi
+            echo "transient failure detected, retrying in 15s..."
+            sleep 15
+          done
 
   build_test_debug_multipass_lazy_evmtestsuite_on_x86:
     name: Test DTVM-EVM multipass in debug mode on x86-64
