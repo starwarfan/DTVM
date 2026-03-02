@@ -105,7 +105,7 @@ inline bool isDupOpcode(uint8_t Op) {
 struct JITSuitabilityResult {
   bool ShouldFallback = false;
   size_t BytecodeSize = 0;
-  size_t MirEstimate = 0;             // linear MIR instruction estimate
+  size_t MirEstimate = 0;             // informational; not used in fallback decision
   size_t RAExpensiveCount = 0;        // total RA-expensive opcodes
   size_t MaxConsecutiveExpensive = 0; // longest unbroken run
   size_t MaxBlockExpensiveCount = 0;  // max RA-expensive ops in one block
@@ -114,11 +114,10 @@ struct JITSuitabilityResult {
 
 /// Thresholds for JIT suitability fallback.  Normal contracts have <20
 /// RA-expensive ops per block; these values are conservatively high.
-/// Bytecode size limit: 64 KB is well above the EIP-170 deployed-code limit
+/// Bytecode size limit: 64 KiB is well above the EIP-170 deployed-code limit
 /// (24 576) and the EIP-3860 initcode limit (49 152), so real-world contracts
-/// are never affected, while pathological synthetic tests (400 KB+) are caught.
+/// are never affected, while oversized synthetic tests (64 KiB+) are caught.
 static constexpr size_t MAX_JIT_BYTECODE_SIZE = 0x10000;
-static constexpr size_t MAX_JIT_MIR_ESTIMATE = 50000;
 static constexpr size_t MAX_CONSECUTIVE_RA_EXPENSIVE = 128;
 static constexpr size_t MAX_BLOCK_RA_EXPENSIVE = 256;
 static constexpr size_t MAX_DUP_FEEDBACK_PATTERN = 64;

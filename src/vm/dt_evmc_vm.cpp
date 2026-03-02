@@ -157,16 +157,13 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
 #ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
   std::unique_ptr<ScopedConfig> TempConfig;
   if (VM->Config.Mode == RunMode::MultipassMode) {
-    auto CacheIt = VM->FallbackCache.find(ModKey);
-    bool NeedFallback;
-    if (CacheIt != VM->FallbackCache.end()) {
-      NeedFallback = CacheIt->second;
-    } else {
+    auto [CacheIt, Inserted] = VM->FallbackCache.try_emplace(ModKey, false);
+    if (Inserted) {
       COMPILER::EVMAnalyzer Analyzer(Rev);
       Analyzer.analyze(Code, CodeSize);
-      NeedFallback = Analyzer.getJITSuitability().ShouldFallback;
-      VM->FallbackCache[ModKey] = NeedFallback;
+      CacheIt->second = Analyzer.getJITSuitability().ShouldFallback;
     }
+    bool NeedFallback = CacheIt->second;
     if (NeedFallback) {
       RuntimeConfig NewConfig = VM->Config;
       NewConfig.Mode = RunMode::InterpMode;
