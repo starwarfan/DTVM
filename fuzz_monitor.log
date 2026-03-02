@@ -1,0 +1,40 @@
+[2026-02-24 12:01:03] 钉钉通知发送成功 - errcode: 0, errmsg: ok
+[2026-02-25 03:06:40] Fuzz监控任务完成
+  - 新增错误文件: 161个 (crash: 144, slow-unit: 17)
+  - 主要错误: Blockhash不匹配(96), 状态不匹配(23), Gas不匹配(21)
+  - 钉钉通知: 发送成功 (errcode: 0)
+
+[2026-02-25 03:08:56] Fuzz监控检查完成 - DingTalk通知发送成功 (errcode: 0, errmsg: ok)
+[2026-02-25 04:11:01] Fuzz监控任务完成 - 钉钉通知发送成功: {"errcode":0,"errmsg":"ok"}
+[2026-02-25 04:17:24] DingTalk notification sent successfully for fuzz_interp_summary.md. Response: {"errcode":0,"errmsg":"ok"}
+[2026-02-26 11:31:00] Fuzz监控任务完成 (Interpreter模式)
+  - 新增错误文件: 0个
+  - crash文件数: 0
+  - slow-unit文件数: 0
+  - leak文件数: 0
+  - 钉钉通知: 发送成功 (errcode: 0, errmsg: ok)
+[2026-02-26 12:01:48] Fuzz监控检查完成 - DingTalk通知发送成功 (errcode: 0, errmsg: ok)
+[2026-02-27 00:03:16] Fuzz监控检查完成 - 钉钉通知发送成功 (errcode:0, errmsg:ok)
+[2026-02-27 12:01:28] Fuzz监控检查完成 - crash: 7个(已修复), 无新增错误, 钉钉通知: 成功(errcode=0)
+[2026-02-27 12:01:38] Interpreter fuzz check completed. DingTalk notification: SUCCESS (errcode=0, errmsg=ok). Crash: 0, Slow-unit: 0, Leak: 0.
+[2026-02-28] Fuzz监控检查完成 - crash: 7个(已修复待清理), 无新增错误, 钉钉通知: 成功(errcode=0, errmsg=ok)
+[2026-02-28 00:04:54] Fuzz监控检查完成 - 发现新增crash
+[2026-02-28 00:04:54] Crash数量: 11554个, 错误类型: status \!= ref_status
+[2026-02-28 00:04:54] 钉钉通知发送状态: 成功 (errcode: 0, errmsg: ok)
+[2026-02-28 12:01:29] Fuzz check completed. DingTalk notification: SUCCESS (errcode: 0, errmsg: ok)
+[2026-02-28 12:01:33] Fuzz interp check completed
+  - Files checked: crash(0), slow-unit(0), leak(0)
+  - New errors found: 0
+  - DingTalk notification: SUCCESS (errcode=0, errmsg=ok)
+---
+[2026-03-01] Fuzz监控检查完成 - crash: 0个, 无新增错误, 钉钉通知: 成功(errcode=0, errmsg:ok)
+[2026-03-01 00:01:53] Fuzz监控检查完成 - 钉钉通知发送成功 (Interpreter模式, 无新增错误)
+[2026-03-01 12:01:51] 钉钉通知发送成功 - errcode: 0, errmsg: ok
+[2026-03-01 12:04:49] Fuzz interp 检查完成 - 钉钉通知: 成功 (errcode=0, errmsg=ok)
+[2026-03-02 00:02:12] 例行检查完成 - 钉钉通知发送成功 (errcode: 0, errmsg: ok)
+[2026-03-02 00:04:05] fuzz_interp 监控检查完成
+  - 检查路径: fuzz_interp_output/
+  - crash: 0, slow-unit: 0, leak: 0
+  - 新增错误: 无
+  - 钉钉通知: 成功 (errcode: 0)
+---

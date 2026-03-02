@@ -1,0 +1,6 @@
+1. 检查fuzz_output下的fuzz错误文件（crash-、slow-unit-、leak-*）的名称/时间/大小, 若fuzz_output为[user]@[ip/hostname]:[path]的远程路径形式，则使用rsync或者scp将远程路径下的文件同步到本地的当前目录下的fuzz_output目录中。
+2. 将fuzz错误文件与fuzz_summary.md中的最近一次检查结果作对比（如果没有则根据references/fuzz_summary_sample.md创建一个新的文件，清空里面记录内容），看是否有新增的错误文件。
+3. 如果有新增的错误文件，使用debug-test-failure的skill对其出错原因进行归类和分析，并更新到fuzz_summary.md的“## 1. 剩余 Crash”中。
+4. 另外无论是否有新错误的文件，都在fuzz_summary.md的“## 2. 分析记录”中写入一条检查记录说明这次例行检查的时间，错误文件的数量。
+5. 将../dingurl.txt的内容设置为DING_URL环境变量，将fuzz_summary.md的绝对路径设置为DING_MD_FILE环境变量，调用../scripts/send_ding_msg.sh发送请求。
+6. 最后在log中记录下这个钉钉请求有没有成功。

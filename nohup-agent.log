@@ -1,0 +1,21 @@
+All tasks complete. Here's a summary of what was done:
+
+**Bugs fixed (6 additional bugs on top of PR #371's 2 bugs):**
+
+1. **Static `calculateGas` macros** (`opcode_handlers.cpp`): Removed `static` keyword from gas cost table lookups that cached stale values across EVM revision changes.
+
+2. **CALL gas uint256 truncation** (`opcode_handlers.cpp`): Changed `static_cast<uint64_t>(Gas)` to `uint256ToUint64(Gas)` to properly clamp large gas arguments instead of silently truncating.
+
+3. **SELFDESTRUCT return data** (`opcode_handlers.cpp`): Added explicit `setReturnData({})` before frame cleanup so stale return data from prior operations isn't leaked.
+
+4. **CREATE `get_balance` short-circuit** (`opcode_handlers.cpp`): Added `Value != 0 &&` guard so `get_balance` isn't called when endowment is zero. The MockedHost's `get_balance` records account access, which inadvertently warmed addresses and caused 2600-gas EIP-2929 cold access charges to be skipped.
+
+5. **SSTORE as gas chunk terminator** (`evm_cache.cpp`): The gas chunk mechanism pre-charged future instructions' costs, making SSTORE's EIP-2200 minimum gas check (`gas <= 2300`) see artificially low gas. Adding SSTORE as a terminator ensures correct gas visibility.
+
+6. **CREATE return data handling** (`opcode_handlers.cpp`): Changed from only preserving return data on REVERT to always setting it from the call result (matching evmone and EIP-211), fixing RETURNDATASIZE mismatches after non-REVERT CREATE failures.
+
+**Results:**
+- PR #372: https://github.com/DTVMStack/DTVM/pull/372
+- All 445 remaining crash files now pass (0 failures)
+- 13,145 total fixed crash files in `fuzz_interp_fixed/`
+- `fuzz_interp_summary.md` updated

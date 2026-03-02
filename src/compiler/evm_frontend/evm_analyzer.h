@@ -105,8 +105,8 @@ inline bool isDupOpcode(uint8_t Op) {
 struct JITSuitabilityResult {
   bool ShouldFallback = false;
   size_t BytecodeSize = 0;
-  size_t MirEstimate = 0;             // informational; not used in fallback decision
-  size_t RAExpensiveCount = 0;        // total RA-expensive opcodes
+  size_t MirEstimate = 0;      // informational; not used in fallback decision
+  size_t RAExpensiveCount = 0; // total RA-expensive opcodes
   size_t MaxConsecutiveExpensive = 0; // longest unbroken run
   size_t MaxBlockExpensiveCount = 0;  // max RA-expensive ops in one block
   size_t DupFeedbackPatternCount = 0; // DUPn immediately before RA-expensive
