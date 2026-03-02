@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
-#include <mutex>
 
 using namespace zen;
 using namespace zen::evm;
@@ -361,11 +360,13 @@ void BaseInterpreter::interpret() {
         size_t sp = Frame->Sp;
 
         // Per-revision dispatch tables: opcodes not available in a given
-        // revision map to TARGET_UNDEFINED.  Thread-safe one-time init
-        // via std::call_once (C++11 guarantees no data race).
+        // revision map to TARGET_UNDEFINED.  Initialized once on first
+        // call.  EVMC execute() is single-threaded per VM instance, so
+        // no data race is possible here; &&label (labels-as-values) is
+        // a GCC/Clang extension that cannot be used inside a lambda.
         static void *cgoto_tables[EVMC_MAX_REVISION + 1][256];
-        static std::once_flag cgoto_init_flag;
-        std::call_once(cgoto_init_flag, [&]() {
+        static bool cgoto_initialized = false;
+        if (!cgoto_initialized) {
           void *undef = &&TARGET_UNDEFINED;
           void *base[256];
           for (int i = 0; i < 256; i++)
@@ -466,7 +467,8 @@ void BaseInterpreter::interpret() {
             for (int i = 0; i < 256; i++)
               cgoto_tables[rev][i] = names[i] ? base[i] : undef;
           }
-        });
+          cgoto_initialized = true;
+        }
         void *const *cgoto_table = cgoto_tables[Revision];
 
 // Dispatch to next opcode or exit if chunk boundary reached
