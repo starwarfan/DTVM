@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <mutex>
 
 using namespace zen;
 using namespace zen::evm;
@@ -359,105 +360,114 @@ void BaseInterpreter::interpret() {
         uint64_t Pc = Frame->Pc;
         size_t sp = Frame->Sp;
 
-        // Dispatch table: 256 entries, one per opcode byte value.
-        // Initialized once at first call (label addresses are stable for
-        // non-nested functions in GCC/Clang).
-        static void *cgoto_table[256] = {};
-        static bool cgoto_initialized = false;
-        if (!cgoto_initialized) {
+        // Per-revision dispatch tables: opcodes not available in a given
+        // revision map to TARGET_UNDEFINED.  Thread-safe one-time init
+        // via std::call_once (C++11 guarantees no data race).
+        static void *cgoto_tables[EVMC_MAX_REVISION + 1][256];
+        static std::once_flag cgoto_init_flag;
+        std::call_once(cgoto_init_flag, [&]() {
+          void *undef = &&TARGET_UNDEFINED;
+          void *base[256];
           for (int i = 0; i < 256; i++)
-            cgoto_table[i] = &&TARGET_UNDEFINED;
-          cgoto_table[0x00] = &&TARGET_STOP;
-          cgoto_table[0x01] = &&TARGET_ADD;
-          cgoto_table[0x02] = &&TARGET_MUL;
-          cgoto_table[0x03] = &&TARGET_SUB;
-          cgoto_table[0x04] = &&TARGET_DIV;
-          cgoto_table[0x05] = &&TARGET_SDIV;
-          cgoto_table[0x06] = &&TARGET_MOD;
-          cgoto_table[0x07] = &&TARGET_SMOD;
-          cgoto_table[0x08] = &&TARGET_ADDMOD;
-          cgoto_table[0x09] = &&TARGET_MULMOD;
-          cgoto_table[0x0a] = &&TARGET_EXP;
-          cgoto_table[0x0b] = &&TARGET_SIGNEXTEND;
-          cgoto_table[0x10] = &&TARGET_LT;
-          cgoto_table[0x11] = &&TARGET_GT;
-          cgoto_table[0x12] = &&TARGET_SLT;
-          cgoto_table[0x13] = &&TARGET_SGT;
-          cgoto_table[0x14] = &&TARGET_EQ;
-          cgoto_table[0x15] = &&TARGET_ISZERO;
-          cgoto_table[0x16] = &&TARGET_AND;
-          cgoto_table[0x17] = &&TARGET_OR;
-          cgoto_table[0x18] = &&TARGET_XOR;
-          cgoto_table[0x19] = &&TARGET_NOT;
-          cgoto_table[0x1a] = &&TARGET_BYTE;
-          cgoto_table[0x1b] = &&TARGET_SHL;
-          cgoto_table[0x1c] = &&TARGET_SHR;
-          cgoto_table[0x1d] = &&TARGET_SAR;
-          cgoto_table[0x1e] = &&TARGET_CLZ;
-          cgoto_table[0x20] = &&TARGET_KECCAK256;
-          cgoto_table[0x30] = &&TARGET_ADDRESS;
-          cgoto_table[0x31] = &&TARGET_BALANCE;
-          cgoto_table[0x32] = &&TARGET_ORIGIN;
-          cgoto_table[0x33] = &&TARGET_CALLER;
-          cgoto_table[0x34] = &&TARGET_CALLVALUE;
-          cgoto_table[0x35] = &&TARGET_CALLDATALOAD;
-          cgoto_table[0x36] = &&TARGET_CALLDATASIZE;
-          cgoto_table[0x37] = &&TARGET_CALLDATACOPY;
-          cgoto_table[0x38] = &&TARGET_CODESIZE;
-          cgoto_table[0x39] = &&TARGET_CODECOPY;
-          cgoto_table[0x3a] = &&TARGET_GASPRICE;
-          cgoto_table[0x3b] = &&TARGET_EXTCODESIZE;
-          cgoto_table[0x3c] = &&TARGET_EXTCODECOPY;
-          cgoto_table[0x3d] = &&TARGET_RETURNDATASIZE;
-          cgoto_table[0x3e] = &&TARGET_RETURNDATACOPY;
-          cgoto_table[0x3f] = &&TARGET_EXTCODEHASH;
-          cgoto_table[0x40] = &&TARGET_BLOCKHASH;
-          cgoto_table[0x41] = &&TARGET_COINBASE;
-          cgoto_table[0x42] = &&TARGET_TIMESTAMP;
-          cgoto_table[0x43] = &&TARGET_NUMBER;
-          cgoto_table[0x44] = &&TARGET_PREVRANDAO;
-          cgoto_table[0x45] = &&TARGET_GASLIMIT;
-          cgoto_table[0x46] = &&TARGET_CHAINID;
-          cgoto_table[0x47] = &&TARGET_SELFBALANCE;
-          cgoto_table[0x48] = &&TARGET_BASEFEE;
-          cgoto_table[0x49] = &&TARGET_BLOBHASH;
-          cgoto_table[0x4a] = &&TARGET_BLOBBASEFEE;
-          cgoto_table[0x50] = &&TARGET_POP;
-          cgoto_table[0x51] = &&TARGET_MLOAD;
-          cgoto_table[0x52] = &&TARGET_MSTORE;
-          cgoto_table[0x53] = &&TARGET_MSTORE8;
-          cgoto_table[0x54] = &&TARGET_SLOAD;
-          cgoto_table[0x55] = &&TARGET_SSTORE;
-          cgoto_table[0x56] = &&TARGET_JUMP;
-          cgoto_table[0x57] = &&TARGET_JUMPI;
-          cgoto_table[0x58] = &&TARGET_PC;
-          cgoto_table[0x59] = &&TARGET_MSIZE;
-          cgoto_table[0x5a] = &&TARGET_GAS;
-          cgoto_table[0x5b] = &&TARGET_JUMPDEST;
-          cgoto_table[0x5c] = &&TARGET_TLOAD;
-          cgoto_table[0x5d] = &&TARGET_TSTORE;
-          cgoto_table[0x5e] = &&TARGET_MCOPY;
-          cgoto_table[0x5f] = &&TARGET_PUSH0;
+            base[i] = undef;
+          base[0x00] = &&TARGET_STOP;
+          base[0x01] = &&TARGET_ADD;
+          base[0x02] = &&TARGET_MUL;
+          base[0x03] = &&TARGET_SUB;
+          base[0x04] = &&TARGET_DIV;
+          base[0x05] = &&TARGET_SDIV;
+          base[0x06] = &&TARGET_MOD;
+          base[0x07] = &&TARGET_SMOD;
+          base[0x08] = &&TARGET_ADDMOD;
+          base[0x09] = &&TARGET_MULMOD;
+          base[0x0a] = &&TARGET_EXP;
+          base[0x0b] = &&TARGET_SIGNEXTEND;
+          base[0x10] = &&TARGET_LT;
+          base[0x11] = &&TARGET_GT;
+          base[0x12] = &&TARGET_SLT;
+          base[0x13] = &&TARGET_SGT;
+          base[0x14] = &&TARGET_EQ;
+          base[0x15] = &&TARGET_ISZERO;
+          base[0x16] = &&TARGET_AND;
+          base[0x17] = &&TARGET_OR;
+          base[0x18] = &&TARGET_XOR;
+          base[0x19] = &&TARGET_NOT;
+          base[0x1a] = &&TARGET_BYTE;
+          base[0x1b] = &&TARGET_SHL;
+          base[0x1c] = &&TARGET_SHR;
+          base[0x1d] = &&TARGET_SAR;
+          base[0x1e] = &&TARGET_CLZ;
+          base[0x20] = &&TARGET_KECCAK256;
+          base[0x30] = &&TARGET_ADDRESS;
+          base[0x31] = &&TARGET_BALANCE;
+          base[0x32] = &&TARGET_ORIGIN;
+          base[0x33] = &&TARGET_CALLER;
+          base[0x34] = &&TARGET_CALLVALUE;
+          base[0x35] = &&TARGET_CALLDATALOAD;
+          base[0x36] = &&TARGET_CALLDATASIZE;
+          base[0x37] = &&TARGET_CALLDATACOPY;
+          base[0x38] = &&TARGET_CODESIZE;
+          base[0x39] = &&TARGET_CODECOPY;
+          base[0x3a] = &&TARGET_GASPRICE;
+          base[0x3b] = &&TARGET_EXTCODESIZE;
+          base[0x3c] = &&TARGET_EXTCODECOPY;
+          base[0x3d] = &&TARGET_RETURNDATASIZE;
+          base[0x3e] = &&TARGET_RETURNDATACOPY;
+          base[0x3f] = &&TARGET_EXTCODEHASH;
+          base[0x40] = &&TARGET_BLOCKHASH;
+          base[0x41] = &&TARGET_COINBASE;
+          base[0x42] = &&TARGET_TIMESTAMP;
+          base[0x43] = &&TARGET_NUMBER;
+          base[0x44] = &&TARGET_PREVRANDAO;
+          base[0x45] = &&TARGET_GASLIMIT;
+          base[0x46] = &&TARGET_CHAINID;
+          base[0x47] = &&TARGET_SELFBALANCE;
+          base[0x48] = &&TARGET_BASEFEE;
+          base[0x49] = &&TARGET_BLOBHASH;
+          base[0x4a] = &&TARGET_BLOBBASEFEE;
+          base[0x50] = &&TARGET_POP;
+          base[0x51] = &&TARGET_MLOAD;
+          base[0x52] = &&TARGET_MSTORE;
+          base[0x53] = &&TARGET_MSTORE8;
+          base[0x54] = &&TARGET_SLOAD;
+          base[0x55] = &&TARGET_SSTORE;
+          base[0x56] = &&TARGET_JUMP;
+          base[0x57] = &&TARGET_JUMPI;
+          base[0x58] = &&TARGET_PC;
+          base[0x59] = &&TARGET_MSIZE;
+          base[0x5a] = &&TARGET_GAS;
+          base[0x5b] = &&TARGET_JUMPDEST;
+          base[0x5c] = &&TARGET_TLOAD;
+          base[0x5d] = &&TARGET_TSTORE;
+          base[0x5e] = &&TARGET_MCOPY;
+          base[0x5f] = &&TARGET_PUSH0;
           for (int i = 0x60; i <= 0x7f; i++)
-            cgoto_table[i] = &&TARGET_PUSHX;
+            base[i] = &&TARGET_PUSHX;
           for (int i = 0x80; i <= 0x8f; i++)
-            cgoto_table[i] = &&TARGET_DUPX;
+            base[i] = &&TARGET_DUPX;
           for (int i = 0x90; i <= 0x9f; i++)
-            cgoto_table[i] = &&TARGET_SWAPX;
+            base[i] = &&TARGET_SWAPX;
           for (int i = 0xa0; i <= 0xa4; i++)
-            cgoto_table[i] = &&TARGET_LOGX;
-          cgoto_table[0xf0] = &&TARGET_CREATEX;
-          cgoto_table[0xf1] = &&TARGET_CALLX;
-          cgoto_table[0xf2] = &&TARGET_CALLX;
-          cgoto_table[0xf3] = &&TARGET_RETURN;
-          cgoto_table[0xf4] = &&TARGET_CALLX;
-          cgoto_table[0xf5] = &&TARGET_CREATEX;
-          cgoto_table[0xfa] = &&TARGET_CALLX;
-          cgoto_table[0xfd] = &&TARGET_REVERT;
-          cgoto_table[0xfe] = &&TARGET_INVALID;
-          cgoto_table[0xff] = &&TARGET_SELFDESTRUCT;
-          cgoto_initialized = true;
-        }
+            base[i] = &&TARGET_LOGX;
+          base[0xf0] = &&TARGET_CREATEX;
+          base[0xf1] = &&TARGET_CALLX;
+          base[0xf2] = &&TARGET_CALLX;
+          base[0xf3] = &&TARGET_RETURN;
+          base[0xf4] = &&TARGET_CALLX;
+          base[0xf5] = &&TARGET_CREATEX;
+          base[0xfa] = &&TARGET_CALLX;
+          base[0xfd] = &&TARGET_REVERT;
+          base[0xfe] = &&TARGET_INVALID;
+          base[0xff] = &&TARGET_SELFDESTRUCT;
+
+          for (int rev = 0; rev <= EVMC_MAX_REVISION; ++rev) {
+            const auto *names = evmc_get_instruction_names_table(
+                static_cast<evmc_revision>(rev));
+            for (int i = 0; i < 256; i++)
+              cgoto_tables[rev][i] = names[i] ? base[i] : undef;
+          }
+        });
+        void *const *cgoto_table = cgoto_tables[Revision];
 
 // Dispatch to next opcode or exit if chunk boundary reached
 #define DISPATCH_NEXT                                                          \
@@ -741,10 +751,6 @@ void BaseInterpreter::interpret() {
         DISPATCH_NEXT;
       }
       TARGET_CLZ : {
-        if (INTX_UNLIKELY(Revision < EVMC_OSAKA)) {
-          Context.setStatus(EVMC_UNDEFINED_INSTRUCTION);
-          goto cgoto_error;
-        }
         if (INTX_UNLIKELY(sp < 1)) {
           Context.setStatus(EVMC_STACK_UNDERFLOW);
           goto cgoto_error;
