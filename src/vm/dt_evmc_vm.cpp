@@ -7,6 +7,7 @@
 #include "evm/interpreter.h"
 #include "runtime/config.h"
 #include "runtime/evm_instance.h"
+#include <algorithm>
 #include "runtime/isolation.h"
 #include "runtime/runtime.h"
 #include "wrapped_host.h"

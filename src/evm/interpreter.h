@@ -77,7 +77,9 @@ private:
 public:
   bool IsJump = false;
 
-  InterpreterExecContext(runtime::EVMInstance *Inst) : Inst(Inst) {}
+  InterpreterExecContext(runtime::EVMInstance *Inst) : Inst(Inst) {
+    FrameStack.reserve(16);
+  }
 
   /// Reset state for reuse across calls. Keeps allocated capacity to avoid
   /// re-allocating the ~32KB EVMFrame on every call.
