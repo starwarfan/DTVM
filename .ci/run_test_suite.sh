@@ -26,10 +26,6 @@ INPUT_FORMAT=${INPUT_FORMAT,,}
 
 CMAKE_OPTIONS="-DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TARGET"
 
-if [[ ${CMAKE_BUILD_TARGET} != "Release" && ${RUN_MODE} != "interpreter" && ${INPUT_FORMAT} == "evm" ]]; then
-    CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_SPDLOG=ON -DZEN_ENABLE_JIT_LOGGING=ON"
-fi
-
 if [ "${ENABLE_ASAN:-false}" = true ]; then
     CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_ASAN=ON"
 fi
@@ -153,7 +149,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                     SKIP_LIST="-*test_blob_gas_subtraction*"
                     GTEST_FILTER=$SKIP_LIST SPEC_TESTS_ARGS=$EXTRA_EXE_OPTIONS ctest --verbose
                 else # evm multipass
-                    SPEC_TESTS_ARGS=$EXTRA_EXE_OPTIONS ctest --verbose -E evmStateTests
+                    SPEC_TESTS_ARGS=$EXTRA_EXE_OPTIONS ctest --verbose
                 fi
             done
             cd ..
