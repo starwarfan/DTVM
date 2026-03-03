@@ -17,6 +17,7 @@ namespace zen {
 
 namespace runtime {
 class EVMInstance;
+void clearReturnDataBuffer(std::vector<uint8_t> &Buffer);
 } // namespace runtime
 
 namespace evm {
@@ -103,6 +104,7 @@ public:
   void setReturnData(std::vector<uint8_t> Data) {
     ReturnData = std::move(Data);
   }
+  void clearReturnData() { runtime::clearReturnDataBuffer(ReturnData); }
   const evmc::Result &getExeResult() const { return ExeResult; }
   void setExeResult(evmc::Result Result) { ExeResult = std::move(Result); }
 
