@@ -30,7 +30,7 @@ if [[ ${CMAKE_BUILD_TARGET} != "Release" && ${RUN_MODE} != "interpreter" && ${IN
     CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_SPDLOG=ON -DZEN_ENABLE_JIT_LOGGING=ON"
 fi
 
-if [ ${ENABLE_ASAN} = true ]; then
+if [ "${ENABLE_ASAN:-false}" = true ]; then
     CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_ASAN=ON"
 fi
 
@@ -47,13 +47,16 @@ case $RUN_MODE in
         ;;
     "multipass")
         CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_SINGLEPASS_JIT=OFF -DZEN_ENABLE_MULTIPASS_JIT=ON"
-        if [ $ENABLE_LAZY = true ]; then
+        if [ "${ENABLE_LAZY:-false}" = true ]; then
             EXTRA_EXE_OPTIONS="$EXTRA_EXE_OPTIONS --enable-multipass-lazy"
         fi
-        if [ $ENABLE_GAS_METER = true ]; then
+        if [ "${ENABLE_GAS_METER:-false}" = true ]; then
             EXTRA_EXE_OPTIONS="$EXTRA_EXE_OPTIONS --enable-evm-gas"
         fi
-        if [ $ENABLE_MULTITHREAD = true ]; then
+        if [ "${ENABLE_GAS_REGISTER:-false}" = true ]; then
+            CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_EVM_GAS_REGISTER=ON"
+        fi
+        if [ "${ENABLE_MULTITHREAD:-false}" = true ]; then
             EXTRA_EXE_OPTIONS="$EXTRA_EXE_OPTIONS --num-multipass-threads 16"
         else
             EXTRA_EXE_OPTIONS="$EXTRA_EXE_OPTIONS --disable-multipass-multithread"
@@ -162,7 +165,6 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             git clone --depth 1 --recurse-submodules -b for_test https://github.com/DTVMStack/evmone.git
             mv build/lib/* evmone
             cd evmone
-            git status
             ./run_unittests.sh ../tests/evmone_unittests/EVMOneMultipassUnitTestsRunList.txt "./libdtvmapi.so,mode=multipass"
             ./run_unittests.sh ../tests/evmone_unittests/EVMOneInterpreterUnitTestsRunList.txt "./libdtvmapi.so,mode=interpreter"
             ;;
