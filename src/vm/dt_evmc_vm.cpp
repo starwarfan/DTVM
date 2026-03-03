@@ -65,7 +65,11 @@ struct CodeAddrRevEqual {
 };
 
 /// Validate that the cached module's code matches the provided code.
-/// Checks code_size + first 256 bytes + last 256 bytes.
+/// Note: This relies on the host guaranteeing that deployed code at a given
+/// address is immutable. We only check the head and tail (up to 256 bytes each)
+/// as a defense-in-depth measure against accidental cache corruption.
+/// For fully untrusted environments where hosts might reuse addresses for
+/// different bytecode, a full CRC/hash check should be implemented instead.
 bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
                        const EVMModule *Mod) {
   if (CodeSize != Mod->CodeSize)
@@ -223,7 +227,13 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
     VM->AddrCache[AddrKey] = Mod;
   }
 
-  // Update L0 cache
+  // Update L0 cache members. Even though L0 lookup is disabled, we maintain
+  // these state variables for two reasons:
+  // 1. Eviction tracking: If a stale L1 entry is replaced, we need to
+  // invalidate
+  //    L0Mod if it pointed to the old module (done in the eviction path above).
+  // 2. Future extensibility: It keeps the door open for re-enabling L0 later
+  //    with a safer validation scheme (e.g., pointer + size + hash).
   VM->LastCodePtr = Code;
   VM->LastCodeSize = CodeSize;
   VM->L0Mod = Mod;

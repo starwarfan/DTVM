@@ -78,7 +78,7 @@ public:
   bool IsJump = false;
 
   InterpreterExecContext(runtime::EVMInstance *Inst) : Inst(Inst) {
-    FrameStack.reserve(16);
+    FrameStack.reserve(1024); // max call depth
   }
 
   /// Reset state for reuse across calls. Keeps allocated capacity to avoid
@@ -112,6 +112,7 @@ public:
   void setStatus(evmc_status_code Status) { this->Status = Status; }
 
   const std::vector<uint8_t> &getReturnData() const { return ReturnData; }
+  void clearReturnData() { ReturnData.clear(); }
   void setReturnData(std::vector<uint8_t> Data) {
     ReturnData = std::move(Data);
   }
