@@ -157,6 +157,9 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
 #ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
   std::unique_ptr<ScopedConfig> TempConfig;
   if (VM->Config.Mode == RunMode::MultipassMode) {
+    if (VM->FallbackCache.size() >= 10000) {
+      VM->FallbackCache.clear(); // Simple eviction to prevent unbounded growth
+    }
     auto [CacheIt, Inserted] = VM->FallbackCache.try_emplace(ModKey, false);
     if (Inserted) {
       COMPILER::EVMAnalyzer Analyzer(Rev);

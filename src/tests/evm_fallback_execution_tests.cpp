@@ -1,6 +1,7 @@
 // Copyright (C) 2025 the DTVM authors. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+#include "compiler/evm_frontend/evm_analyzer.h"
 #include "vm/dt_evmc_vm.h"
 #include <evmc/evmc.h>
 #include <evmc/mocked_host.hpp>
@@ -140,6 +141,70 @@ TEST_F(EVMFallbackExecutionTest, FallbackWithStackOperations) {
 #endif
 }
 
+class EVMAnalyzerTest : public ::testing::Test {};
+
+TEST_F(EVMAnalyzerTest, BenignPushHeavyCode) {
+  // 300 PUSH1 ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x60); // PUSH1
+    Code.push_back(0x01); // 1
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_FALSE(Result.ShouldFallback);
+  EXPECT_EQ(Result.RAExpensiveCount, 0);
+  EXPECT_EQ(Result.MaxConsecutiveExpensive, 0);
+  EXPECT_EQ(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, HighRAExpensiveDensity) {
+  // MAX_BLOCK_RA_EXPENSIVE + 1 of ADDMOD ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x08); // ADDMOD
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  // Should trigger the consecutive or total block expensive ops limit
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.MaxConsecutiveExpensive, 0);
+}
+
+TEST_F(EVMAnalyzerTest, DupFeedbackPattern) {
+  // Many DUP ops followed by expensive ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 100; ++i) {
+    Code.push_back(0x80); // DUP1
+    Code.push_back(0x02); // MUL
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, OversizedBytecode) {
+  // Just over 64KiB
+  std::vector<uint8_t> Code(0x10001, 0x00); // STOP
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.BytecodeSize, 0x10000);
+}
+
 // Test 3: Multiple Fallback Triggers
 TEST_F(EVMFallbackExecutionTest, MultipleFallbackTriggers) {
 #ifdef ZEN_ENABLE_JIT_FALLBACK_TEST
@@ -170,6 +235,70 @@ TEST_F(EVMFallbackExecutionTest, MultipleFallbackTriggers) {
 #else
   GTEST_SKIP() << "ZEN_ENABLE_JIT_FALLBACK_TEST not enabled";
 #endif
+}
+
+class EVMAnalyzerTest : public ::testing::Test {};
+
+TEST_F(EVMAnalyzerTest, BenignPushHeavyCode) {
+  // 300 PUSH1 ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x60); // PUSH1
+    Code.push_back(0x01); // 1
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_FALSE(Result.ShouldFallback);
+  EXPECT_EQ(Result.RAExpensiveCount, 0);
+  EXPECT_EQ(Result.MaxConsecutiveExpensive, 0);
+  EXPECT_EQ(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, HighRAExpensiveDensity) {
+  // MAX_BLOCK_RA_EXPENSIVE + 1 of ADDMOD ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x08); // ADDMOD
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  // Should trigger the consecutive or total block expensive ops limit
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.MaxConsecutiveExpensive, 0);
+}
+
+TEST_F(EVMAnalyzerTest, DupFeedbackPattern) {
+  // Many DUP ops followed by expensive ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 100; ++i) {
+    Code.push_back(0x80); // DUP1
+    Code.push_back(0x02); // MUL
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, OversizedBytecode) {
+  // Just over 64KiB
+  std::vector<uint8_t> Code(0x10001, 0x00); // STOP
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.BytecodeSize, 0x10000);
 }
 
 // Test 4: Fallback at Different PC Positions
@@ -236,6 +365,70 @@ TEST_F(EVMFallbackExecutionTest, FallbackWithMemoryOperations) {
 #else
   GTEST_SKIP() << "ZEN_ENABLE_JIT_FALLBACK_TEST not enabled";
 #endif
+}
+
+class EVMAnalyzerTest : public ::testing::Test {};
+
+TEST_F(EVMAnalyzerTest, BenignPushHeavyCode) {
+  // 300 PUSH1 ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x60); // PUSH1
+    Code.push_back(0x01); // 1
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_FALSE(Result.ShouldFallback);
+  EXPECT_EQ(Result.RAExpensiveCount, 0);
+  EXPECT_EQ(Result.MaxConsecutiveExpensive, 0);
+  EXPECT_EQ(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, HighRAExpensiveDensity) {
+  // MAX_BLOCK_RA_EXPENSIVE + 1 of ADDMOD ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x08); // ADDMOD
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  // Should trigger the consecutive or total block expensive ops limit
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.MaxConsecutiveExpensive, 0);
+}
+
+TEST_F(EVMAnalyzerTest, DupFeedbackPattern) {
+  // Many DUP ops followed by expensive ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 100; ++i) {
+    Code.push_back(0x80); // DUP1
+    Code.push_back(0x02); // MUL
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, OversizedBytecode) {
+  // Just over 64KiB
+  std::vector<uint8_t> Code(0x10001, 0x00); // STOP
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.BytecodeSize, 0x10000);
 }
 
 // Test 6: Fallback Gas Consumption Test
@@ -310,6 +503,70 @@ TEST_F(EVMFallbackExecutionTest, FallbackErrorHandling) {
 #endif
 }
 
+class EVMAnalyzerTest : public ::testing::Test {};
+
+TEST_F(EVMAnalyzerTest, BenignPushHeavyCode) {
+  // 300 PUSH1 ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x60); // PUSH1
+    Code.push_back(0x01); // 1
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_FALSE(Result.ShouldFallback);
+  EXPECT_EQ(Result.RAExpensiveCount, 0);
+  EXPECT_EQ(Result.MaxConsecutiveExpensive, 0);
+  EXPECT_EQ(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, HighRAExpensiveDensity) {
+  // MAX_BLOCK_RA_EXPENSIVE + 1 of ADDMOD ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x08); // ADDMOD
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  // Should trigger the consecutive or total block expensive ops limit
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.MaxConsecutiveExpensive, 0);
+}
+
+TEST_F(EVMAnalyzerTest, DupFeedbackPattern) {
+  // Many DUP ops followed by expensive ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 100; ++i) {
+    Code.push_back(0x80); // DUP1
+    Code.push_back(0x02); // MUL
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, OversizedBytecode) {
+  // Just over 64KiB
+  std::vector<uint8_t> Code(0x10001, 0x00); // STOP
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.BytecodeSize, 0x10000);
+}
+
 // Test 8: Comprehensive Fallback Workflow Test
 TEST_F(EVMFallbackExecutionTest, ComprehensiveFallbackWorkflow) {
 #ifdef ZEN_ENABLE_JIT_FALLBACK_TEST
@@ -356,4 +613,68 @@ TEST_F(EVMFallbackExecutionTest, ComprehensiveFallbackWorkflow) {
 #else
   GTEST_SKIP() << "ZEN_ENABLE_JIT_FALLBACK_TEST not enabled";
 #endif
+}
+
+class EVMAnalyzerTest : public ::testing::Test {};
+
+TEST_F(EVMAnalyzerTest, BenignPushHeavyCode) {
+  // 300 PUSH1 ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x60); // PUSH1
+    Code.push_back(0x01); // 1
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_FALSE(Result.ShouldFallback);
+  EXPECT_EQ(Result.RAExpensiveCount, 0);
+  EXPECT_EQ(Result.MaxConsecutiveExpensive, 0);
+  EXPECT_EQ(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, HighRAExpensiveDensity) {
+  // MAX_BLOCK_RA_EXPENSIVE + 1 of ADDMOD ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 300; ++i) {
+    Code.push_back(0x08); // ADDMOD
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  // Should trigger the consecutive or total block expensive ops limit
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.MaxConsecutiveExpensive, 0);
+}
+
+TEST_F(EVMAnalyzerTest, DupFeedbackPattern) {
+  // Many DUP ops followed by expensive ops
+  std::vector<uint8_t> Code;
+  for (int i = 0; i < 100; ++i) {
+    Code.push_back(0x80); // DUP1
+    Code.push_back(0x02); // MUL
+  }
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.DupFeedbackPatternCount, 0);
+}
+
+TEST_F(EVMAnalyzerTest, OversizedBytecode) {
+  // Just over 64KiB
+  std::vector<uint8_t> Code(0x10001, 0x00); // STOP
+
+  zen::COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  Analyzer.analyze(Code.data(), Code.size());
+  auto Result = Analyzer.getJITSuitability();
+
+  EXPECT_TRUE(Result.ShouldFallback);
+  EXPECT_GT(Result.BytecodeSize, 0x10000);
 }
