@@ -362,8 +362,9 @@ void BaseInterpreter::interpret() {
         // Per-revision dispatch tables: opcodes not available in a given
         // revision map to TARGET_UNDEFINED.  Initialized once on first
         // call.  EVMC execute() is single-threaded per VM instance, so
-        // no data race is possible here; &&label (labels-as-values) is
-        // a GCC/Clang extension that cannot be used inside a lambda.
+        // no data race in practice.  std::call_once cannot be used here
+        // because &&label (GCC/Clang extension) requires labels to be in
+        // the same function, and a lambda creates a separate function.
         static void *cgoto_tables[EVMC_MAX_REVISION + 1][256];
         static bool cgoto_initialized = false;
         if (!cgoto_initialized) {
@@ -774,6 +775,10 @@ void BaseInterpreter::interpret() {
         DISPATCH_NEXT;
       }
       TARGET_PUSH0 : {
+        if (INTX_UNLIKELY(Revision < EVMC_SHANGHAI)) {
+          Context.setStatus(EVMC_UNDEFINED_INSTRUCTION);
+          goto cgoto_error;
+        }
         if (INTX_UNLIKELY(sp >= MAXSTACK)) {
           Context.setStatus(EVMC_STACK_OVERFLOW);
           goto cgoto_error;
