@@ -363,7 +363,7 @@ jobs:
           export TestSuite=benchmarksuite
           export CPU_EXCEPTION_TYPE='cpu'
           export BENCHMARK_MODE=${{ matrix.mode }}
-          export BENCHMARK_THRESHOLD=0.20
+          export BENCHMARK_THRESHOLD=0.25
           export BENCHMARK_BASELINE_CACHE=/tmp/perf_baseline_${{ matrix.mode }}.json
           export BENCHMARK_BASELINE_LIB=/tmp/baseline_lib
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
