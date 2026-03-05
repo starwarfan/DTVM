@@ -368,9 +368,8 @@ jobs:
           export BENCHMARK_BASELINE_LIB=/tmp/baseline_lib
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
           export BENCHMARK_REPETITIONS=5
-          export BENCHMARK_MIN_TIME=2s
 
-          bash .ci/run_test_suite.sh
+          setarch x86_64 -R bash .ci/run_test_suite.sh
         continue-on-error: true
 
       - name: Write Performance Summary
