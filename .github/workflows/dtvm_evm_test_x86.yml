@@ -369,7 +369,7 @@ jobs:
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
           export BENCHMARK_REPETITIONS=5
 
-          setarch x86_64 -R bash .ci/run_test_suite.sh
+          bash .ci/run_test_suite.sh
         continue-on-error: true
 
       - name: Write Performance Summary
