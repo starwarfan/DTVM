@@ -370,7 +370,7 @@ jobs:
           export BENCHMARK_REPETITIONS=5
           export BENCHMARK_MIN_TIME=2s
 
-          bash .ci/run_test_suite.sh
+          setarch x86_64 -R bash .ci/run_test_suite.sh
         continue-on-error: true
 
       - name: Write Performance Summary
