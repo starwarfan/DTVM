@@ -43,6 +43,7 @@ def run_benchmark(
     benchmark_dir: str,
     extra_args: Optional[List[str]] = None,
     repetitions: int = 3,
+    benchmark_min_time: Optional[str] = None,
 ) -> List[BenchmarkResult]:
     """Run benchmark and parse JSON output.
 
@@ -74,6 +75,10 @@ def run_benchmark(
     if repetitions > 1:
         cmd.append(f"--benchmark_repetitions={repetitions}")
         cmd.append("--benchmark_report_aggregates_only=true")
+        cmd.append("--benchmark_enable_random_interleaving=true")
+
+    if benchmark_min_time:
+        cmd.append(f"--benchmark_min_time={benchmark_min_time}")
 
     if extra_args:
         cmd.extend(extra_args)
@@ -472,6 +477,12 @@ Examples:
         help="Run each benchmark N times and use the median. "
              "Reduces ASLR and shared-runner noise. (default: 3)",
     )
+    parser.add_argument(
+        "--benchmark-min-time",
+        type=str,
+        default=None,
+        help="Minimum execution time per benchmark (e.g., '1s' or '2.0'). Forwarded to evmone-bench.",
+    )
 
     args = parser.parse_args()
 
@@ -490,6 +501,7 @@ Examples:
             benchmark_dir=args.benchmark_dir,
             extra_args=bench_extra,
             repetitions=args.benchmark_repetitions,
+            benchmark_min_time=args.benchmark_min_time,
         )
     except Exception as e:
         print(f"::error::Failed to run benchmarks: {e}")

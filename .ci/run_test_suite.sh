@@ -178,6 +178,16 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             BENCHMARK_THRESHOLD=${BENCHMARK_THRESHOLD:-0.15}
             BENCHMARK_MODE=${BENCHMARK_MODE:-multipass}
             BENCHMARK_SUMMARY_FILE=${BENCHMARK_SUMMARY_FILE:-/tmp/perf_summary.md}
+            BENCHMARK_REPETITIONS=${BENCHMARK_REPETITIONS:-3}
+            BENCHMARK_MIN_TIME=${BENCHMARK_MIN_TIME:-""}
+
+            PERF_ARGS=""
+            if [ -n "$BENCHMARK_REPETITIONS" ]; then
+                PERF_ARGS="$PERF_ARGS --benchmark-repetitions $BENCHMARK_REPETITIONS"
+            fi
+            if [ -n "$BENCHMARK_MIN_TIME" ]; then
+                PERF_ARGS="$PERF_ARGS --benchmark-min-time $BENCHMARK_MIN_TIME"
+            fi
 
             cp build/lib/* $EVMONE_DIR/
 
@@ -195,7 +205,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             if [ -n "$BASELINE_CACHE" ] && [ -f "$BASELINE_CACHE" ]; then
                 # Cached baseline available -- only run current benchmarks.
                 echo "Using cached baseline: $BASELINE_CACHE"
-                python3 check_performance_regression.py \
+                python3 check_performance_regression.py $PERF_ARGS \
                     --baseline "$BASELINE_CACHE" \
                     --threshold "$BENCHMARK_THRESHOLD" \
                     --output-summary "$BENCHMARK_SUMMARY_FILE" \
@@ -208,7 +218,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 echo "Running baseline benchmarks with library from base branch..."
                 cp "$BENCHMARK_BASELINE_LIB"/libdtvmapi.so ./libdtvmapi.so
                 SAVE_PATH=${BASELINE_CACHE:-/tmp/perf_baseline.json}
-                python3 check_performance_regression.py \
+                python3 check_performance_regression.py $PERF_ARGS \
                     --save-baseline "$SAVE_PATH" \
                     --lib ./libdtvmapi.so \
                     --mode "$BENCHMARK_MODE" \
@@ -216,7 +226,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
 
                 echo "Running current benchmarks with PR library..."
                 cp ../build/lib/libdtvmapi.so ./libdtvmapi.so
-                python3 check_performance_regression.py \
+                python3 check_performance_regression.py $PERF_ARGS \
                     --baseline "$SAVE_PATH" \
                     --threshold "$BENCHMARK_THRESHOLD" \
                     --output-summary "$BENCHMARK_SUMMARY_FILE" \
@@ -225,7 +235,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                     --benchmark-dir test/evm-benchmarks/benchmarks
             elif [ -n "$BENCHMARK_SAVE_BASELINE" ]; then
                 echo "Saving performance baseline..."
-                python3 check_performance_regression.py \
+                python3 check_performance_regression.py $PERF_ARGS \
                     --save-baseline "$BENCHMARK_SAVE_BASELINE" \
                     --output-summary "$BENCHMARK_SUMMARY_FILE" \
                     --lib ./libdtvmapi.so \
@@ -233,7 +243,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                     --benchmark-dir test/evm-benchmarks/benchmarks
             elif [ -n "$BENCHMARK_BASELINE_FILE" ]; then
                 echo "Checking performance regression against baseline..."
-                python3 check_performance_regression.py \
+                python3 check_performance_regression.py $PERF_ARGS \
                     --baseline "$BENCHMARK_BASELINE_FILE" \
                     --threshold "$BENCHMARK_THRESHOLD" \
                     --output-summary "$BENCHMARK_SUMMARY_FILE" \
@@ -242,7 +252,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                     --benchmark-dir test/evm-benchmarks/benchmarks
             else
                 echo "Running benchmark suite without comparison..."
-                python3 check_performance_regression.py \
+                python3 check_performance_regression.py $PERF_ARGS \
                     --save-baseline benchmark_results.json \
                     --output-summary "$BENCHMARK_SUMMARY_FILE" \
                     --lib ./libdtvmapi.so \
