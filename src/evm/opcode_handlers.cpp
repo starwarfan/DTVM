@@ -13,6 +13,8 @@
 thread_local zen::evm::EVMFrame *zen::evm::EVMResource::CurrentFrame = nullptr;
 thread_local zen::evm::InterpreterExecContext
     *zen::evm::EVMResource::CurrentContext = nullptr;
+thread_local const evmc_instruction_metrics
+    *zen::evm::EVMResource::CurrentMetricsTable = nullptr;
 
 using namespace zen;
 using namespace zen::evm;
@@ -35,20 +37,17 @@ evmc_revision currentRevision() {
 
 #define DEFINE_CALCULATE_GAS(OpName, OpCode)                                   \
   template <> uint64_t OpName##Handler::calculateGas() {                       \
-    const auto *Table = evmc_get_instruction_metrics_table(currentRevision()); \
-    return Table[OpCode].gas_cost;                                             \
+    return EVMResource::getMetricsTable()[OpCode].gas_cost;                    \
   }
 
 #define DEFINE_NOT_TEMPLATE_CALCULATE_GAS(OpName, OpCode)                      \
   uint64_t OpName##Handler::calculateGas() {                                   \
-    const auto *Table = evmc_get_instruction_metrics_table(currentRevision()); \
-    return Table[OpCode].gas_cost;                                             \
+    return EVMResource::getMetricsTable()[OpCode].gas_cost;                    \
   }
 
 #define DEFINE_MULTICODE_NOT_TEMPLATE_CALCULATE_GAS(OpName)                    \
   uint64_t OpName##Handler::calculateGas() {                                   \
-    const auto *Table = evmc_get_instruction_metrics_table(currentRevision()); \
-    return Table[OpCode].gas_cost;                                             \
+    return EVMResource::getMetricsTable()[OpCode].gas_cost;                    \
   }
 
 /* ---------- Define gas cost macros end ---------- */

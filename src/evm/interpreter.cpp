@@ -308,6 +308,8 @@ void InterpreterExecContext::setTxContext(const evmc_tx_context &TxContext) {
 
 void InterpreterExecContext::setResource() {
   EVMResource::setExecutionContext(getCurFrame(), this);
+  const auto *Table = evmc_get_instruction_metrics_table(Inst->getRevision());
+  EVMResource::setMetricsTable(Table);
 }
 
 void BaseInterpreter::interpret() {
@@ -325,6 +327,7 @@ void BaseInterpreter::interpret() {
   Byte *Code = Mod->Code;
   evmc_revision Revision = Context.getInstance()->getRevision();
   const auto *MetricsTable = evmc_get_instruction_metrics_table(Revision);
+  EVMResource::setMetricsTable(MetricsTable);
   const auto *NamesTable = evmc_get_instruction_names_table(Revision);
   const auto &Cache = Mod->getBytecodeCache();
   const uint8_t *__restrict JumpDestMap = Cache.JumpDestMap.data();
