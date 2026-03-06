@@ -111,6 +111,11 @@ public:
   void setError(const Error &E) { Err = E; }
   void clearError() { Err = ErrorCode::NoError; }
 
+  /// Reset instance state for reuse across EVMC execute() calls, regardless
+  /// of execution mode (interpreter, multipass, or JIT). This avoids the cost
+  /// of destroying and recreating the instance for each call.
+  void resetForNewCall(evmc_revision NewRev);
+
   // can only called by hostapi directly
   // setExceptionByHostapi must be inline to capture the hostapi's frame
   // pointer
