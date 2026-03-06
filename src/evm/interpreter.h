@@ -113,11 +113,10 @@ public:
   void setStatus(evmc_status_code Status) { this->Status = Status; }
 
   const std::vector<uint8_t> &getReturnData() const { return ReturnData; }
-  void clearReturnData() { ReturnData.clear(); }
+  void clearReturnData() { runtime::clearReturnDataBuffer(ReturnData); }
   void setReturnData(std::vector<uint8_t> Data) {
     ReturnData = std::move(Data);
   }
-  void clearReturnData() { runtime::clearReturnDataBuffer(ReturnData); }
   const evmc::Result &getExeResult() const { return ExeResult; }
   void setExeResult(evmc::Result Result) { ExeResult = std::move(Result); }
 
