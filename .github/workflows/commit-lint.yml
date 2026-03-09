@@ -38,7 +38,7 @@ jobs:
               'scope-enum': [2, 'always', [
                 'core', 'runtime', 'compiler', 'examples', 'docs', 'tools', 'deps', 'ci', 'test', 'evm', 'other', ''
               ]],
-              'body-max-line-length': [1, 'always', 100],
+              'body-max-line-length': [1, 'always', 120],
               'subject-case': [0, 'never'],
             },
             helpUrl: 'https://github.com/DTVMStack/DTVM/blob/main/docs/COMMIT_CONVENTION.md',
