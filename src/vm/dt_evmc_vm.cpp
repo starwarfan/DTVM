@@ -42,6 +42,55 @@ private:
   RuntimeConfig PreviousConfig;
 };
 
+// Forward declaration for InstanceGuard
+struct DTVM;
+
+// RAII guard for temporary EVMInstance cleanup (exception safety for nested
+// calls). Ensures that temporary instances created for nested calls (depth > 0)
+// are properly deleted even if an exception occurs during execution.
+struct InstanceGuard {
+  DTVM *VM;
+  EVMInstance *Inst;
+  bool ShouldDelete;
+
+  InstanceGuard(DTVM *VM, EVMInstance *Inst, bool ShouldDelete)
+      : VM(VM), Inst(Inst), ShouldDelete(ShouldDelete) {}
+
+  InstanceGuard(const InstanceGuard &) = delete;
+  InstanceGuard &operator=(const InstanceGuard &) = delete;
+
+  InstanceGuard(InstanceGuard &&Other) noexcept
+      : VM(Other.VM), Inst(Other.Inst), ShouldDelete(Other.ShouldDelete) {
+    Other.ShouldDelete = false;
+  }
+
+  ~InstanceGuard();
+
+  void release() { ShouldDelete = false; }
+};
+
+// RAII helper for host context save/restore (exception safety).
+// Ensures host context is always restored on all exit paths, including
+// exceptions.
+struct HostContextScope {
+  ::WrappedHost *ExecHost;
+  const evmc_host_interface *PrevInterface;
+  evmc_host_context *PrevContext;
+
+  HostContextScope(::WrappedHost *Host, const evmc_host_interface *Interface,
+                   evmc_host_context *Context)
+      : ExecHost(Host), PrevInterface(Host->getInterface()),
+        PrevContext(Host->getContext()) {
+    ExecHost->reinitialize(Interface, Context);
+  }
+
+  ~HostContextScope() { ExecHost->reinitialize(PrevInterface, PrevContext); }
+
+  // Non-copyable
+  HostContextScope(const HostContextScope &) = delete;
+  HostContextScope &operator=(const HostContextScope &) = delete;
+};
+
 // ---- Address-based module cache types ----
 
 struct CodeAddrRevKey {
@@ -114,7 +163,7 @@ struct DTVM : evmc_vm {
                           .Mode = RunMode::MultipassMode,
                           .EnableEvmGasMetering = true};
   std::unique_ptr<Runtime> RT;
-  std::unique_ptr<WrappedHost> ExecHost;
+  std::unique_ptr<::WrappedHost> ExecHost;
   Isolation *Iso = nullptr;
 
   // ---- Module & instance cache (shared by interpreter and multipass) ----
@@ -132,6 +181,13 @@ struct DTVM : evmc_vm {
   // Cached InterpreterExecContext (interpreter mode only)
   std::unique_ptr<zen::evm::InterpreterExecContext> CachedCtx;
 };
+
+// InstanceGuard destructor (defined after DTVM is complete)
+InstanceGuard::~InstanceGuard() {
+  if (ShouldDelete && Inst && VM && VM->Iso) {
+    VM->Iso->deleteEVMInstance(Inst);
+  }
+}
 
 /// The implementation of the evmc_vm::destroy() method.
 void destroy(evmc_vm *VMInstance) { delete static_cast<DTVM *>(VMInstance); }
@@ -240,10 +296,24 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   return Mod;
 }
 
-/// Get or create a cached EVMInstance for the given module.
-/// Reuses the existing instance if it was created for the same module.
-/// Returns nullptr on failure.
-EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev) {
+/// Get or create an EVMInstance for the given module.
+/// For top-level calls (depth == 0), reuses the cached instance if possible.
+/// For nested calls (depth > 0), creates a temporary instance that must be
+/// deleted by the caller after use (caller can check depth > 0).
+EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev,
+                                 int32_t Depth) {
+  // For nested calls, we need a separate instance because each instance is
+  // bound to a specific Module. The nested call may execute different code.
+  if (Depth > 0) {
+    auto InstRet = VM->Iso->createEVMInstance(*Mod, 0);
+    if (!InstRet)
+      return nullptr;
+    EVMInstance *TempInst = *InstRet;
+    TempInst->resetForNewCall(Rev);
+    return TempInst; // Caller must delete this instance (when depth > 0)
+  }
+
+  // Top-level call: create or reuse cached instance
   EVMInstance *TheInst = VM->CachedInst;
   if (!TheInst || TheInst->getModule() != Mod) {
     if (TheInst) {
@@ -256,6 +326,7 @@ EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev) {
     TheInst = *InstRet;
     VM->CachedInst = TheInst;
   }
+
   TheInst->resetForNewCall(Rev);
   return TheInst;
 }
@@ -269,30 +340,29 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
                                        evmc_revision Rev,
                                        const evmc_message *Msg,
                                        const uint8_t *Code, size_t CodeSize) {
-  // Reinitialize host context
-  const auto *PrevInterface = VM->ExecHost->getInterface();
-  auto *PrevContext = VM->ExecHost->getContext();
-  VM->ExecHost->reinitialize(Host, Context);
+  // RAII guard for host context save/restore (exception safety)
+  HostContextScope HostScope(VM->ExecHost.get(), Host, Context);
 
   // Ensure runtime and isolation exist
   if (!ensureRuntimeAndIsolation(VM)) {
-    VM->ExecHost->reinitialize(PrevInterface, PrevContext);
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
   // Module lookup: L1 address-based cache -> Cold load
   EVMModule *Mod = findModuleCached(VM, Code, CodeSize, Rev, Msg);
   if (!Mod) {
-    VM->ExecHost->reinitialize(PrevInterface, PrevContext);
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
-  // Instance reuse (shared)
-  EVMInstance *TheInst = getOrCreateInstance(VM, Mod, Rev);
+  // Instance reuse (shared for top-level, temporary for nested)
+  EVMInstance *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
   if (!TheInst) {
-    VM->ExecHost->reinitialize(PrevInterface, PrevContext);
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
+
+  // RAII guard for exception safety: ensures temporary instance cleanup
+  // even if an exception occurs during execution (e.g., std::bad_alloc)
+  InstanceGuard InstGuard(VM, TheInst, Msg->depth > 0);
 
   // Trigger bytecodeCache build if not yet done (lazy, cached on module)
   (void)Mod->getBytecodeCache();
@@ -304,13 +374,26 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   TheInst->setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
   TheInst->pushMessage(&MsgWithCode);
 
-  // Reuse cached InterpreterExecContext to avoid ~32KB frame alloc per call
-  if (!VM->CachedCtx) {
-    VM->CachedCtx = std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
+  // For nested calls, create a new InterpreterExecContext
+  // For top-level calls, reuse cached context
+  std::unique_ptr<zen::evm::InterpreterExecContext> TempCtx;
+  zen::evm::InterpreterExecContext *CtxPtr = nullptr;
+  if (Msg->depth > 0) {
+    // Nested call: create temporary context
+    TempCtx = std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
+    CtxPtr = TempCtx.get();
   } else {
-    VM->CachedCtx->resetForNewCall(TheInst);
+    // Top-level call: reuse cached context
+    if (!VM->CachedCtx) {
+      VM->CachedCtx =
+          std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
+    } else {
+      VM->CachedCtx->resetForNewCall(TheInst);
+    }
+    CtxPtr = VM->CachedCtx.get();
   }
-  auto &Ctx = *VM->CachedCtx;
+
+  auto &Ctx = *CtxPtr;
   zen::evm::BaseInterpreter Interpreter(Ctx);
   Ctx.allocTopFrame(&MsgWithCode);
   Interpreter.interpret();
@@ -319,8 +402,8 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
       std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
   Result.gas_left = TheInst->getGas();
 
-  // Restore host context
-  VM->ExecHost->reinitialize(PrevInterface, PrevContext);
+  // RAII guards handle cleanup: InstanceGuard for nested calls,
+  // HostContextScope for host context restoration
 
   return Result.release_raw();
 }
@@ -339,19 +422,7 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
   }
 
   // ---- Multipass / other modes: use callEVMMain for JIT execution ----
-  struct HostContextScope {
-    WrappedHost *ExecHost;
-    const evmc_host_interface *PrevInterface;
-    evmc_host_context *PrevContext;
-    HostContextScope(WrappedHost *Host, const evmc_host_interface *Interface,
-                     evmc_host_context *Context)
-        : ExecHost(Host), PrevInterface(Host->getInterface()),
-          PrevContext(Host->getContext()) {
-      ExecHost->reinitialize(Interface, Context);
-    }
-    ~HostContextScope() { ExecHost->reinitialize(PrevInterface, PrevContext); }
-  };
-
+  // RAII guard for host context save/restore (exception safety)
   HostContextScope HostScope(VM->ExecHost.get(), Host, Context);
 
   if (!ensureRuntimeAndIsolation(VM)) {
@@ -384,11 +455,13 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
-  // Instance reuse (shared with interpreter path)
-  auto *TheInst = getOrCreateInstance(VM, Mod, Rev);
+  // Instance reuse (shared for top-level, temporary for nested)
+  auto *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
   if (!TheInst) {
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
+
+  InstanceGuard InstGuard(VM, TheInst, Msg->depth > 0);
 
   // Execute via callEVMMain (handles both JIT and interpreter fallback)
   evmc_message Message = *Msg;
@@ -409,7 +482,7 @@ DTVM::DTVM()
     : evmc_vm{EVMC_ABI_VERSION, "dtvm",    PROJECT_VERSION,
               ::destroy,        ::execute, ::get_capabilities,
               ::set_option},
-      ExecHost(new WrappedHost) {}
+      ExecHost(new ::WrappedHost) {}
 } // namespace
 
 extern "C" evmc_vm *evmc_create_dtvmapi() { return new DTVM; }
