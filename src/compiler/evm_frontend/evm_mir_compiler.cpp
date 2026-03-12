@@ -1287,21 +1287,179 @@ void EVMMirBuilder::handleJumpDest(const uint64_t &PC) {
 
 // ==================== Arithmetic Instruction Handlers ====================
 
+MInstruction *EVMMirBuilder::createEvmUmul128(MInstruction *LHS,
+                                              MInstruction *RHS) {
+  return createInstruction<EvmUmul128Instruction>(false, OP_evm_umul128_lo,
+                                                  &Ctx.I64Type, LHS, RHS);
+}
+
+MInstruction *EVMMirBuilder::createEvmUmul128Hi(MInstruction *MulInst) {
+  return createInstruction<EvmUmul128HiInstruction>(false, &Ctx.I64Type,
+                                                    MulInst);
+}
+
 typename EVMMirBuilder::Operand EVMMirBuilder::handleMul(Operand MultiplicandOp,
                                                          Operand MultiplierOp) {
+  // Phase 0: Constant folding
+  if (MultiplicandOp.isConstant() && MultiplierOp.isConstant()) {
+    intx::uint256 A = u256ValueToIntx(MultiplicandOp.getConstValue());
+    intx::uint256 B = u256ValueToIntx(MultiplierOp.getConstValue());
+    return Operand(intxToU256Value(A * B));
+  }
+
+  // Phase 4: u64 fast path - one operand fits in u64 (4x1 multiplication)
+  bool AisU64 = MultiplicandOp.isConstU64();
+  bool BisU64 = MultiplierOp.isConstU64();
+  if (AisU64 || BisU64) {
+    const Operand &U256Op = AisU64 ? MultiplierOp : MultiplicandOp;
+    const Operand &U64Op = AisU64 ? MultiplicandOp : MultiplierOp;
+
+    U256Inst A = extractU256Operand(U256Op);
+    MType *I64Type = &Ctx.I64Type;
+    MInstruction *B0 =
+        createIntConstInstruction(I64Type, U64Op.getConstValue()[0]);
+    MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+
+    // 4x1 schoolbook: Result = A * B0 (truncated to 256 bits)
+    // P[i] = A[i] * B0, splitting into lo/hi 64-bit halves
+    MInstruction *PLo[4];
+    MInstruction *PHi[3];
+    for (size_t I = 0; I < 4; ++I) {
+      PLo[I] = createEvmUmul128(A[I], B0);
+      if (I < 3)
+        PHi[I] = createEvmUmul128Hi(PLo[I]);
+    }
+
+    using SumCarryPair = std::pair<MInstruction *, MInstruction *>;
+    auto addTermWithCarry = [&](MInstruction *Sum, MInstruction *Carry,
+                                MInstruction *Term) -> SumCarryPair {
+      MInstruction *NewSum = createInstruction<BinaryInstruction>(
+          false, OP_add, I64Type, Sum, Term);
+      MInstruction *NewCarry =
+          createInstruction<AdcInstruction>(false, I64Type, Carry, Zero, Zero);
+      return {protectUnsafeValue(NewSum, I64Type),
+              protectUnsafeValue(NewCarry, I64Type)};
+    };
+
+    auto addTermNoCarry = [&](MInstruction *Sum, MInstruction *Term) {
+      MInstruction *NewSum = createInstruction<BinaryInstruction>(
+          false, OP_add, I64Type, Sum, Term);
+      return protectUnsafeValue(NewSum, I64Type);
+    };
+
+    // R[0] = PLo[0]
+    MInstruction *R0 = PLo[0];
+
+    // R[1] = PHi[0] + PLo[1]
+    MInstruction *R1 = PHi[0];
+    MInstruction *C1 = Zero;
+    {
+      auto [S1, C1a] = addTermWithCarry(R1, C1, PLo[1]);
+      R1 = S1;
+      C1 = C1a;
+    }
+
+    // R[2] = PHi[1] + PLo[2] + C1
+    MInstruction *R2 = PHi[1];
+    MInstruction *C2 = Zero;
+    {
+      auto [S1, C2a] = addTermWithCarry(R2, C2, PLo[2]);
+      auto [S2, C2b] = addTermWithCarry(S1, C2a, C1);
+      R2 = S2;
+      C2 = C2b;
+    }
+
+    // R[3] = PHi[2] + PLo[3] + C2 (truncated, no carry out needed)
+    MInstruction *R3 = PHi[2];
+    R3 = addTermNoCarry(R3, PLo[3]);
+    R3 = addTermNoCarry(R3, C2);
+
+    U256Inst Result = {R0, R1, R2, R3};
+    return Operand(Result, EVMType::UINT256);
+  }
+
+  // Full 4x4 schoolbook multiplication
+  // U256 layout: [0]=lo64, [1]=mid-lo, [2]=mid-hi, [3]=hi64
+  //
+  // For 256-bit truncated result, we need products where i+j < 4:
+  //   R[0] = P00_lo
+  //   R[1] = P00_hi + P01_lo + P10_lo
+  //   R[2] = P01_hi + P10_hi + P02_lo + P11_lo + P20_lo
+  //   R[3] = P02_hi + P11_hi + P20_hi + P03_lo + P12_lo + P21_lo + P30_lo
+
   U256Inst A = extractU256Operand(MultiplicandOp);
   U256Inst B = extractU256Operand(MultiplierOp);
-  MType *I64Type = &Ctx.I64Type;
 
-  MInstruction *MulInst = createInstruction<EvmU256MulInstruction>(
-      false, I64Type, A[0], A[1], A[2], A[3], B[0], B[1], B[2], B[3]);
-  U256Inst Result = {MulInst,
-                     createInstruction<EvmU256MulResultInstruction>(
-                         false, I64Type, MulInst, 1),
-                     createInstruction<EvmU256MulResultInstruction>(
-                         false, I64Type, MulInst, 2),
-                     createInstruction<EvmU256MulResultInstruction>(
-                         false, I64Type, MulInst, 3)};
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+
+  MInstruction *PLo[4][4] = {};
+  MInstruction *PHi[4][4] = {};
+
+  for (size_t I = 0; I < 4; ++I) {
+    for (size_t J = 0; J < 4; ++J) {
+      if (I + J < 4) {
+        PLo[I][J] = createEvmUmul128(A[I], B[J]);
+      }
+      if (I + J < 3) {
+        PHi[I][J] = createEvmUmul128Hi(PLo[I][J]);
+      }
+    }
+  }
+
+  using SumCarryPair = std::pair<MInstruction *, MInstruction *>;
+
+  auto addTermWithCarry = [&](MInstruction *Sum, MInstruction *Carry,
+                              MInstruction *Term) -> SumCarryPair {
+    MInstruction *NewSum =
+        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
+    MInstruction *NewCarry =
+        createInstruction<AdcInstruction>(false, I64Type, Carry, Zero, Zero);
+    return {protectUnsafeValue(NewSum, I64Type),
+            protectUnsafeValue(NewCarry, I64Type)};
+  };
+
+  auto addTermNoCarry = [&](MInstruction *Sum, MInstruction *Term) {
+    MInstruction *NewSum =
+        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
+    return protectUnsafeValue(NewSum, I64Type);
+  };
+
+  MInstruction *R0 = PLo[0][0];
+
+  MInstruction *R1 = PHi[0][0];
+  MInstruction *C1 = Zero;
+  {
+    auto [S1, C1a] = addTermWithCarry(R1, C1, PLo[0][1]);
+    auto [S2, C1b] = addTermWithCarry(S1, C1a, PLo[1][0]);
+    R1 = S2;
+    C1 = C1b;
+  }
+
+  MInstruction *R2 = PHi[0][1];
+  MInstruction *C2 = Zero;
+  {
+    auto [S1, C2a] = addTermWithCarry(R2, C2, PHi[1][0]);
+    auto [S2, C2b] = addTermWithCarry(S1, C2a, PLo[0][2]);
+    auto [S3, C2c] = addTermWithCarry(S2, C2b, PLo[1][1]);
+    auto [S4, C2d] = addTermWithCarry(S3, C2c, PLo[2][0]);
+    auto [S5, C2e] = addTermWithCarry(S4, C2d, C1);
+    R2 = S5;
+    C2 = C2e;
+  }
+
+  MInstruction *R3 = PHi[0][2];
+  {
+    R3 = addTermNoCarry(R3, PHi[1][1]);
+    R3 = addTermNoCarry(R3, PHi[2][0]);
+    R3 = addTermNoCarry(R3, PLo[0][3]);
+    R3 = addTermNoCarry(R3, PLo[1][2]);
+    R3 = addTermNoCarry(R3, PLo[2][1]);
+    R3 = addTermNoCarry(R3, PLo[3][0]);
+    R3 = addTermNoCarry(R3, C2);
+  }
+
+  U256Inst Result = {R0, R1, R2, R3};
   return Operand(Result, EVMType::UINT256);
 }
 
@@ -1762,6 +1920,12 @@ EVMMirBuilder::handleCompareGT_LT(const U256Inst &LHS, const U256Inst &RHS,
 }
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleNot(const Operand &LHSOp) {
+  // Phase 0: Constant folding
+  if (LHSOp.isConstant()) {
+    const auto &V = LHSOp.getConstValue();
+    return Operand(U256Value{~V[0], ~V[1], ~V[2], ~V[3]});
+  }
+
   U256Inst Result = {};
   U256Inst LHS = extractU256Operand(LHSOp);
 
@@ -1774,6 +1938,184 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleNot(const Operand &LHSOp) {
     Result[I] = protectUnsafeValue(LocalResult, MirI64Type);
   }
 
+  return Operand(Result, EVMType::UINT256);
+}
+
+// ==================== u64 Fast Path Helpers ====================
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleAddU64Const(const Operand &FullOp,
+                                 const Operand &U64ConstOp) {
+  U256Inst LHS = extractU256Operand(FullOp);
+  MType *MirI64Type =
+      EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MInstruction *Carry = createIntConstInstruction(MirI64Type, 0);
+
+  MInstruction *RHS0 =
+      createIntConstInstruction(MirI64Type, U64ConstOp.getConstValue()[0]);
+  MInstruction *RHSZero = createIntConstInstruction(MirI64Type, 0);
+
+  // Pre-materialize LHS operands for carry chain safety
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    LHS[I] = protectUnsafeValue(LHS[I], MirI64Type);
+  }
+  RHS0 = protectUnsafeValue(RHS0, MirI64Type);
+  MInstruction *ProtectedZero = protectUnsafeValue(RHSZero, MirI64Type);
+
+  U256Inst Result = {};
+  // Limb 0: ADD with the actual u64 value
+  Result[0] = protectUnsafeValue(createInstruction<BinaryInstruction>(
+                                     false, OP_add, MirI64Type, LHS[0], RHS0),
+                                 MirI64Type);
+  // Limbs 1-3: ADC with shared zero (carry propagation only)
+  for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+    Result[I] =
+        protectUnsafeValue(createInstruction<AdcInstruction>(
+                               false, MirI64Type, LHS[I], ProtectedZero, Carry),
+                           MirI64Type);
+  }
+  return Operand(Result, EVMType::UINT256);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleSubU64Const(const Operand &LHSOp,
+                                 const Operand &U64ConstRHSOp) {
+  U256Inst LHS = extractU256Operand(LHSOp);
+  MType *MirI64Type =
+      EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+
+  MInstruction *RHS0 =
+      createIntConstInstruction(MirI64Type, U64ConstRHSOp.getConstValue()[0]);
+
+  // Limb 0: full sub
+  MInstruction *Diff0 = createInstruction<BinaryInstruction>(
+      false, OP_sub, MirI64Type, LHS[0], RHS0);
+  // Borrow from limb 0: LHS[0] < RHS0
+  auto LTPredicate = CmpInstruction::Predicate::ICMP_ULT;
+  MInstruction *Borrow = createInstruction<CmpInstruction>(
+      false, LTPredicate, &Ctx.I64Type, LHS[0], RHS0);
+  Borrow = zeroExtendToI64(Borrow);
+
+  U256Inst Result = {};
+  Result[0] = protectUnsafeValue(Diff0, MirI64Type);
+
+  // Limbs 1-3: only subtract the borrow (RHS is 0 for upper limbs)
+  for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+    MInstruction *Diff = createInstruction<BinaryInstruction>(
+        false, OP_sub, MirI64Type, LHS[I], Borrow);
+    Result[I] = protectUnsafeValue(Diff, MirI64Type);
+
+    if (I < EVM_ELEMENTS_COUNT - 1) {
+      // New borrow: LHS[I] < Borrow
+      MInstruction *NewBorrow = createInstruction<CmpInstruction>(
+          false, LTPredicate, &Ctx.I64Type, LHS[I], Borrow);
+      Borrow = zeroExtendToI64(NewBorrow);
+    }
+  }
+  return Operand(Result, EVMType::UINT256);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleCompareEqU64(const Operand &FullOp, uint64_t U64Val) {
+  U256Inst LHS = extractU256Operand(FullOp);
+  MType *MirI64Type =
+      EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
+
+  // Check low limb against the u64 value
+  MInstruction *CmpVal = createIntConstInstruction(MirI64Type, U64Val);
+  auto EqPred = CmpInstruction::Predicate::ICMP_EQ;
+  MInstruction *LowEq = createInstruction<CmpInstruction>(
+      false, EqPred, &Ctx.I64Type, LHS[0], CmpVal);
+
+  // Check that upper limbs are all zero via OR-fold
+  MInstruction *Upper = createInstruction<BinaryInstruction>(
+      false, OP_or, MirI64Type, LHS[1], LHS[2]);
+  Upper = createInstruction<BinaryInstruction>(false, OP_or, MirI64Type, Upper,
+                                               LHS[3]);
+  MInstruction *UpperZero = createInstruction<CmpInstruction>(
+      false, EqPred, &Ctx.I64Type, Upper, Zero);
+
+  // Final: low matches AND upper is zero
+  MInstruction *FinalResult = createInstruction<BinaryInstruction>(
+      false, OP_and, &Ctx.I64Type, LowEq, UpperZero);
+
+  U256Inst Result = {};
+  Result[0] = protectUnsafeValue(FinalResult, MirI64Type);
+  for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+    Result[I] = Zero;
+  }
+  return Operand(Result, EVMType::UINT256);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleCompareLtRhsU64(const Operand &LHSOp, uint64_t RhsU64) {
+  // LT(a, u64_b): a < b where b fits in u64
+  // If a >= 2^64 (upper limbs non-zero), then a > any u64, so result = false
+  // Otherwise, compare a[0] < b
+  U256Inst LHS = extractU256Operand(LHSOp);
+  MType *MirI64Type =
+      EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
+
+  MInstruction *Upper = createInstruction<BinaryInstruction>(
+      false, OP_or, MirI64Type, LHS[1], LHS[2]);
+  Upper = createInstruction<BinaryInstruction>(false, OP_or, MirI64Type, Upper,
+                                               LHS[3]);
+  auto NePred = CmpInstruction::Predicate::ICMP_NE;
+  MInstruction *HasUpper = createInstruction<CmpInstruction>(
+      false, NePred, &Ctx.I64Type, Upper, Zero);
+
+  MInstruction *RhsVal = createIntConstInstruction(MirI64Type, RhsU64);
+  auto LtPred = CmpInstruction::Predicate::ICMP_ULT;
+  MInstruction *LowLt = createInstruction<CmpInstruction>(
+      false, LtPred, &Ctx.I64Type, LHS[0], RhsVal);
+
+  // result = hasUpper ? 0 : lowLt
+  MInstruction *FinalResult = createInstruction<SelectInstruction>(
+      false, &Ctx.I64Type, HasUpper, Zero, LowLt);
+
+  U256Inst Result = {};
+  Result[0] = protectUnsafeValue(FinalResult, MirI64Type);
+  for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+    Result[I] = Zero;
+  }
+  return Operand(Result, EVMType::UINT256);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleCompareGtRhsU64(const Operand &LHSOp, uint64_t RhsU64) {
+  // GT(a, u64_b): a > b where b fits in u64
+  // If a >= 2^64 (upper limbs non-zero), then a > any u64, so result = true
+  // Otherwise, compare a[0] > b
+  U256Inst LHS = extractU256Operand(LHSOp);
+  MType *MirI64Type =
+      EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
+  MInstruction *One = createIntConstInstruction(MirI64Type, 1);
+
+  MInstruction *Upper = createInstruction<BinaryInstruction>(
+      false, OP_or, MirI64Type, LHS[1], LHS[2]);
+  Upper = createInstruction<BinaryInstruction>(false, OP_or, MirI64Type, Upper,
+                                               LHS[3]);
+  auto NePred = CmpInstruction::Predicate::ICMP_NE;
+  MInstruction *HasUpper = createInstruction<CmpInstruction>(
+      false, NePred, &Ctx.I64Type, Upper, Zero);
+
+  MInstruction *RhsVal = createIntConstInstruction(MirI64Type, RhsU64);
+  auto GtPred = CmpInstruction::Predicate::ICMP_UGT;
+  MInstruction *LowGt = createInstruction<CmpInstruction>(
+      false, GtPred, &Ctx.I64Type, LHS[0], RhsVal);
+
+  // result = hasUpper ? 1 : lowGt
+  MInstruction *FinalResult = createInstruction<SelectInstruction>(
+      false, &Ctx.I64Type, HasUpper, One, LowGt);
+
+  U256Inst Result = {};
+  Result[0] = protectUnsafeValue(FinalResult, MirI64Type);
+  for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+    Result[I] = Zero;
+  }
   return Operand(Result, EVMType::UINT256);
 }
 
