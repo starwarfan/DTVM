@@ -54,12 +54,14 @@ public:
     case MInstruction::EVM_UMUL128_HI:
       visitEvmUmul128HiInstruction(static_cast<EvmUmul128HiInstruction &>(I));
       break;
-    case MInstruction::EVM_U256_MUL:
-      visitEvmU256MulInstruction(static_cast<EvmU256MulInstruction &>(I));
+    case MInstruction::EVM_UDIV128_BY64:
+      visitEvmUdiv128By64Instruction(
+          static_cast<EvmUdiv128By64Instruction &>(I));
       break;
-    case MInstruction::EVM_U256_MUL_RESULT:
-      visitEvmU256MulResultInstruction(
-          static_cast<EvmU256MulResultInstruction &>(I));
+    case MInstruction::EVM_UREM128_BY64:
+      visitEvmUrem128By64Instruction(
+          static_cast<EvmUrem128By64Instruction &>(I));
+
       break;
     case MInstruction::CMP:
       visitCmpInstruction(static_cast<CmpInstruction &>(I));
@@ -192,11 +194,12 @@ public:
   virtual void visitEvmUmul128HiInstruction(EvmUmul128HiInstruction &I) {
     VISIT_OPERAND_1
   }
-  virtual void visitEvmU256MulInstruction(EvmU256MulInstruction &I) {
-    VISIT_OPERANDS
+  virtual void
+  visitEvmUdiv128By64Instruction(EvmUdiv128By64Instruction &I) {
+    VISIT_OPERAND_3
   }
   virtual void
-  visitEvmU256MulResultInstruction(EvmU256MulResultInstruction &I) {
+  visitEvmUrem128By64Instruction(EvmUrem128By64Instruction &I) {
     VISIT_OPERAND_1
   }
 

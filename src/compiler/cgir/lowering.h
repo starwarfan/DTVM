@@ -191,13 +191,14 @@ protected:
       ResultReg =
           SELF.lowerEvmUmul128HiExpr(llvm::cast<EvmUmul128HiInstruction>(Inst));
       break;
-    case MInstruction::EVM_U256_MUL:
-      ResultReg =
-          SELF.lowerEvmU256MulExpr(llvm::cast<EvmU256MulInstruction>(Inst));
+    case MInstruction::EVM_UDIV128_BY64:
+      ResultReg = SELF.lowerEvmUdiv128By64Expr(
+          llvm::cast<EvmUdiv128By64Instruction>(Inst));
       break;
-    case MInstruction::EVM_U256_MUL_RESULT:
-      ResultReg = SELF.lowerEvmU256MulResultExpr(
-          llvm::cast<EvmU256MulResultInstruction>(Inst));
+    case MInstruction::EVM_UREM128_BY64:
+      ResultReg = SELF.lowerEvmUrem128By64Expr(
+          llvm::cast<EvmUrem128By64Instruction>(Inst));
+
       break;
     case MInstruction::ADC:
       ResultReg = SELF.lowerAdcExpr(llvm::cast<AdcInstruction>(Inst));

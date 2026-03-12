@@ -1298,6 +1298,114 @@ MInstruction *EVMMirBuilder::createEvmUmul128Hi(MInstruction *MulInst) {
                                                     MulInst);
 }
 
+MInstruction *EVMMirBuilder::createEvmUdiv128By64(MInstruction *Hi,
+                                                   MInstruction *Lo,
+                                                   MInstruction *Divisor) {
+  return createInstruction<EvmUdiv128By64Instruction>(
+      false, OP_evm_udiv128_by64, &Ctx.I64Type, Hi, Lo, Divisor);
+}
+
+MInstruction *EVMMirBuilder::createEvmUrem128By64(MInstruction *DivInst) {
+  return createInstruction<EvmUrem128By64Instruction>(false, &Ctx.I64Type,
+                                                      DivInst);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleDivU64Divisor(const Operand &DividendOp,
+                                   uint64_t Divisor) {
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+  MInstruction *DivConst = createIntConstInstruction(I64Type, Divisor);
+
+  U256Inst A = extractU256Operand(DividendOp);
+
+  // Cascading division: (0:A[3]) / D, then (R3:A[2]) / D, ...
+  MInstruction *Div3 = createEvmUdiv128By64(Zero, A[3], DivConst);
+  MInstruction *Rem3 = createEvmUrem128By64(Div3);
+  MInstruction *Div2 = createEvmUdiv128By64(Rem3, A[2], DivConst);
+  MInstruction *Rem2 = createEvmUrem128By64(Div2);
+  MInstruction *Div1 = createEvmUdiv128By64(Rem2, A[1], DivConst);
+  MInstruction *Rem1 = createEvmUrem128By64(Div1);
+  MInstruction *Div0 = createEvmUdiv128By64(Rem1, A[0], DivConst);
+
+  U256Inst Result = {Div0, Div1, Div2, Div3};
+  return Operand(Result, EVMType::UINT256);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleModU64Divisor(const Operand &DividendOp,
+                                   uint64_t Divisor) {
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+  MInstruction *DivConst = createIntConstInstruction(I64Type, Divisor);
+
+  U256Inst A = extractU256Operand(DividendOp);
+
+  // Cascading division to get remainder
+  MInstruction *Div3 = createEvmUdiv128By64(Zero, A[3], DivConst);
+  MInstruction *Rem3 = createEvmUrem128By64(Div3);
+  MInstruction *Div2 = createEvmUdiv128By64(Rem3, A[2], DivConst);
+  MInstruction *Rem2 = createEvmUrem128By64(Div2);
+  MInstruction *Div1 = createEvmUdiv128By64(Rem2, A[1], DivConst);
+  MInstruction *Rem1 = createEvmUrem128By64(Div1);
+  MInstruction *Div0 = createEvmUdiv128By64(Rem1, A[0], DivConst);
+  MInstruction *Rem0 = createEvmUrem128By64(Div0);
+
+  U256Inst Result = {Rem0, Zero, Zero, Zero};
+  return Operand(Result, EVMType::UINT256);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleDivU64Dividend(uint64_t Dividend,
+                                    const Operand &DivisorOp) {
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+
+  U256Inst B = extractU256Operand(DivisorOp);
+
+  // If divisor has any upper limb set, b > a, so DIV = 0
+  MInstruction *Upper = createInstruction<BinaryInstruction>(
+      false, OP_or, I64Type,
+      B[1], createInstruction<BinaryInstruction>(
+                false, OP_or, I64Type, B[2], B[3]));
+  MInstruction *HasUpper = createInstruction<CmpInstruction>(
+      false, CmpInstruction::ICMP_NE, &Ctx.I64Type, Upper, Zero);
+
+  MInstruction *A0 = createIntConstInstruction(I64Type, Dividend);
+  MInstruction *Q64 =
+      createInstruction<BinaryInstruction>(false, OP_udiv, I64Type, A0, B[0]);
+  MInstruction *DivResult = createInstruction<SelectInstruction>(
+      false, I64Type, HasUpper, Zero, Q64);
+
+  U256Inst Result = {DivResult, Zero, Zero, Zero};
+  return Operand(Result, EVMType::UINT256);
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleModU64Dividend(uint64_t Dividend,
+                                    const Operand &DivisorOp) {
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+
+  U256Inst B = extractU256Operand(DivisorOp);
+
+  MInstruction *Upper = createInstruction<BinaryInstruction>(
+      false, OP_or, I64Type,
+      B[1], createInstruction<BinaryInstruction>(
+                false, OP_or, I64Type, B[2], B[3]));
+  MInstruction *HasUpper = createInstruction<CmpInstruction>(
+      false, CmpInstruction::ICMP_NE, &Ctx.I64Type, Upper, Zero);
+
+  MInstruction *A0 = createIntConstInstruction(I64Type, Dividend);
+  MInstruction *R64 =
+      createInstruction<BinaryInstruction>(false, OP_urem, I64Type, A0, B[0]);
+  MInstruction *ModResult = createInstruction<SelectInstruction>(
+      false, I64Type, HasUpper, A0, R64);
+
+  U256Inst Result = {ModResult, Zero, Zero, Zero};
+  return Operand(Result, EVMType::UINT256);
+}
+
 typename EVMMirBuilder::Operand EVMMirBuilder::handleMul(Operand MultiplicandOp,
                                                          Operand MultiplierOp) {
   // Phase 0: Constant folding
@@ -1465,6 +1573,42 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMul(Operand MultiplicandOp,
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleDiv(Operand DividendOp,
                                                          Operand DivisorOp) {
+  if (DividendOp.isConstant() && DivisorOp.isConstant()) {
+    intx::uint256 D = u256ValueToIntx(DivisorOp.getConstValue());
+    if (D == 0)
+      return Operand(U256Value{0, 0, 0, 0});
+    intx::uint256 N = u256ValueToIntx(DividendOp.getConstValue());
+    return Operand(intxToU256Value(N / D));
+  }
+
+  // DIV(x, 2^n) -> SHR(x, n)
+  if (DivisorOp.isConstant()) {
+    intx::uint256 D = u256ValueToIntx(DivisorOp.getConstValue());
+    if (D != 0 && (D & (D - 1)) == 0) {
+      unsigned ShiftAmt = 0;
+      intx::uint256 Tmp = D;
+      while (Tmp > 1) {
+        Tmp >>= 1;
+        ++ShiftAmt;
+      }
+      Operand ShiftOp(U256Value{ShiftAmt, 0, 0, 0});
+      return handleShift<BinaryOperator::BO_SHR_U>(ShiftOp, DividendOp);
+    }
+  }
+
+  // u64 divisor: inline cascading 128/64 division
+  if (DivisorOp.isConstU64()) {
+    uint64_t D = DivisorOp.getConstValue()[0];
+    if (D != 0)
+      return handleDivU64Divisor(DividendOp, D);
+  }
+
+  // u64 dividend: OR-fold + select
+  if (DividendOp.isConstU64()) {
+    uint64_t A = DividendOp.getConstValue()[0];
+    return handleDivU64Dividend(A, DivisorOp);
+  }
+
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                         const intx::uint256 &>(RuntimeFunctions.GetDiv,
@@ -1473,6 +1617,49 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDiv(Operand DividendOp,
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleSDiv(Operand DividendOp,
                                                           Operand DivisorOp) {
+  if (DividendOp.isConstant() && DivisorOp.isConstant()) {
+    intx::uint256 D = u256ValueToIntx(DivisorOp.getConstValue());
+    if (D == 0)
+      return Operand(U256Value{0, 0, 0, 0});
+    intx::uint256 N = u256ValueToIntx(DividendOp.getConstValue());
+    auto Result = intx::sdivrem(N, D);
+    return Operand(intxToU256Value(Result.quot));
+  }
+
+  // u64 divisor (value fits in i63, so it's positive): use unsigned div + sign
+  if (DivisorOp.isConstU64()) {
+    uint64_t D = DivisorOp.getConstValue()[0];
+    if (D != 0 && D <= INT64_MAX) {
+      MType *I64Type = &Ctx.I64Type;
+      MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+      U256Inst A = extractU256Operand(DividendOp);
+      MInstruction *SignBit = createInstruction<CmpInstruction>(
+          false, CmpInstruction::ICMP_SLT, &Ctx.I64Type, A[3], Zero);
+      Operand NegA = handleNot(DividendOp);
+      Operand AbsDividend =
+          handleAddU64Const(NegA, Operand(U256Value{1, 0, 0, 0}));
+      U256Inst AbsInst = extractU256Operand(AbsDividend);
+      U256Inst SelA;
+      for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+        SelA[I] = createInstruction<SelectInstruction>(false, I64Type, SignBit,
+                                                       AbsInst[I], A[I]);
+      }
+      Operand AbsOp(SelA, EVMType::UINT256);
+      Operand UnsignedResult = handleDivU64Divisor(AbsOp, D);
+      Operand NegResult = handleNot(UnsignedResult);
+      Operand NegResult1 =
+          handleAddU64Const(NegResult, Operand(U256Value{1, 0, 0, 0}));
+      U256Inst URes = extractU256Operand(UnsignedResult);
+      U256Inst NRes = extractU256Operand(NegResult1);
+      U256Inst FinalInst;
+      for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+        FinalInst[I] = createInstruction<SelectInstruction>(
+            false, I64Type, SignBit, NRes[I], URes[I]);
+      }
+      return Operand(FinalInst, EVMType::UINT256);
+    }
+  }
+
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                         const intx::uint256 &>(RuntimeFunctions.GetSDiv,
@@ -1481,6 +1668,36 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleSDiv(Operand DividendOp,
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleMod(Operand DividendOp,
                                                          Operand DivisorOp) {
+  if (DividendOp.isConstant() && DivisorOp.isConstant()) {
+    intx::uint256 D = u256ValueToIntx(DivisorOp.getConstValue());
+    if (D == 0)
+      return Operand(U256Value{0, 0, 0, 0});
+    intx::uint256 N = u256ValueToIntx(DividendOp.getConstValue());
+    return Operand(intxToU256Value(N % D));
+  }
+
+  // MOD(x, 2^n) -> AND(x, 2^n - 1)
+  if (DivisorOp.isConstant()) {
+    intx::uint256 D = u256ValueToIntx(DivisorOp.getConstValue());
+    if (D != 0 && (D & (D - 1)) == 0) {
+      Operand MaskOp(intxToU256Value(D - 1));
+      return handleBitwiseOp<BinaryOperator::BO_AND>(DividendOp, MaskOp);
+    }
+  }
+
+  // u64 divisor: inline cascading 128/64 mod
+  if (DivisorOp.isConstU64()) {
+    uint64_t D = DivisorOp.getConstValue()[0];
+    if (D != 0)
+      return handleModU64Divisor(DividendOp, D);
+  }
+
+  // u64 dividend: OR-fold + select
+  if (DividendOp.isConstU64()) {
+    uint64_t A = DividendOp.getConstValue()[0];
+    return handleModU64Dividend(A, DivisorOp);
+  }
+
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                         const intx::uint256 &>(RuntimeFunctions.GetMod,
@@ -1489,6 +1706,49 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMod(Operand DividendOp,
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleSMod(Operand DividendOp,
                                                           Operand DivisorOp) {
+  if (DividendOp.isConstant() && DivisorOp.isConstant()) {
+    intx::uint256 D = u256ValueToIntx(DivisorOp.getConstValue());
+    if (D == 0)
+      return Operand(U256Value{0, 0, 0, 0});
+    intx::uint256 N = u256ValueToIntx(DividendOp.getConstValue());
+    auto Result = intx::sdivrem(N, D);
+    return Operand(intxToU256Value(Result.rem));
+  }
+
+  // u64 divisor (fits in i63): sign of result = sign of dividend
+  if (DivisorOp.isConstU64()) {
+    uint64_t D = DivisorOp.getConstValue()[0];
+    if (D != 0 && D <= INT64_MAX) {
+      MType *I64Type = &Ctx.I64Type;
+      MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+      U256Inst A = extractU256Operand(DividendOp);
+      MInstruction *SignBit = createInstruction<CmpInstruction>(
+          false, CmpInstruction::ICMP_SLT, &Ctx.I64Type, A[3], Zero);
+      Operand NegA = handleNot(DividendOp);
+      Operand AbsDividend =
+          handleAddU64Const(NegA, Operand(U256Value{1, 0, 0, 0}));
+      U256Inst AbsInst = extractU256Operand(AbsDividend);
+      U256Inst SelA;
+      for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+        SelA[I] = createInstruction<SelectInstruction>(false, I64Type, SignBit,
+                                                       AbsInst[I], A[I]);
+      }
+      Operand AbsOp(SelA, EVMType::UINT256);
+      Operand UnsignedResult = handleModU64Divisor(AbsOp, D);
+      Operand NegResult = handleNot(UnsignedResult);
+      Operand NegResult1 =
+          handleAddU64Const(NegResult, Operand(U256Value{1, 0, 0, 0}));
+      U256Inst URes = extractU256Operand(UnsignedResult);
+      U256Inst NRes = extractU256Operand(NegResult1);
+      U256Inst FinalInst;
+      for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+        FinalInst[I] = createInstruction<SelectInstruction>(
+            false, I64Type, SignBit, NRes[I], URes[I]);
+      }
+      return Operand(FinalInst, EVMType::UINT256);
+    }
+  }
+
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                         const intx::uint256 &>(RuntimeFunctions.GetSMod,
@@ -1498,6 +1758,17 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleSMod(Operand DividendOp,
 typename EVMMirBuilder::Operand EVMMirBuilder::handleAddMod(Operand AugendOp,
                                                             Operand AddendOp,
                                                             Operand ModulusOp) {
+  if (AugendOp.isConstant() && AddendOp.isConstant() &&
+      ModulusOp.isConstant()) {
+    intx::uint256 M = u256ValueToIntx(ModulusOp.getConstValue());
+    if (M == 0)
+      return Operand(U256Value{0, 0, 0, 0});
+    intx::uint512 Sum = intx::uint512(u256ValueToIntx(AugendOp.getConstValue())) +
+                         intx::uint512(u256ValueToIntx(AddendOp.getConstValue()));
+    intx::uint256 Result = intx::uint256(Sum % M);
+    return Operand(intxToU256Value(Result));
+  }
+
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                         const intx::uint256 &, const intx::uint256 &>(
@@ -1507,6 +1778,18 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleAddMod(Operand AugendOp,
 typename EVMMirBuilder::Operand
 EVMMirBuilder::handleMulMod(Operand MultiplicandOp, Operand MultiplierOp,
                             Operand ModulusOp) {
+  if (MultiplicandOp.isConstant() && MultiplierOp.isConstant() &&
+      ModulusOp.isConstant()) {
+    intx::uint256 M = u256ValueToIntx(ModulusOp.getConstValue());
+    if (M == 0)
+      return Operand(U256Value{0, 0, 0, 0});
+    intx::uint512 Product =
+        intx::uint512(u256ValueToIntx(MultiplicandOp.getConstValue())) *
+        intx::uint512(u256ValueToIntx(MultiplierOp.getConstValue()));
+    intx::uint256 Result = intx::uint256(Product % M);
+    return Operand(intxToU256Value(Result));
+  }
+
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                         const intx::uint256 &, const intx::uint256 &>(

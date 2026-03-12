@@ -739,60 +739,50 @@ private:
   }
 };
 
-class EvmU256MulInstruction : public FixedOperandInstruction<8> {
+// EVM 128-bit / 64-bit unsigned division: (hi:lo) / divisor -> quotient.
+class EvmUdiv128By64Instruction : public FixedOperandInstruction<3> {
 public:
   template <typename... Arguments>
-  static EvmU256MulInstruction *create(Arguments &&...Args) {
-    return FixedOperandInstruction::create<EvmU256MulInstruction>(
+  static EvmUdiv128By64Instruction *create(Arguments &&...Args) {
+    return FixedOperandInstruction::create<EvmUdiv128By64Instruction>(
         std::forward<Arguments>(Args)...);
   }
 
   static bool classof(const MInstruction *Instr) {
-    return Instr->getKind() == EVM_U256_MUL;
+    return Instr->getKind() == EVM_UDIV128_BY64;
   }
 
 private:
   friend class FixedOperandInstruction;
-  EvmU256MulInstruction(MType *Type, MInstruction *A0, MInstruction *A1,
-                        MInstruction *A2, MInstruction *A3, MInstruction *B0,
-                        MInstruction *B1, MInstruction *B2, MInstruction *B3)
-      : FixedOperandInstruction(MInstruction::EVM_U256_MUL, OP_evm_u256_mul, 8,
-                                Type) {
-    setOperand<0>(A0);
-    setOperand<1>(A1);
-    setOperand<2>(A2);
-    setOperand<3>(A3);
-    setOperand<4>(B0);
-    setOperand<5>(B1);
-    setOperand<6>(B2);
-    setOperand<7>(B3);
+  EvmUdiv128By64Instruction(Opcode Opc, MType *Type, MInstruction *Hi,
+                            MInstruction *Lo, MInstruction *Divisor)
+      : FixedOperandInstruction(MInstruction::EVM_UDIV128_BY64, Opc, 3, Type) {
+    setOperand<0>(Hi);
+    setOperand<1>(Lo);
+    setOperand<2>(Divisor);
   }
 };
 
-class EvmU256MulResultInstruction : public UnaryInstruction {
+// Extract remainder from EVM udiv128_by64 instruction.
+class EvmUrem128By64Instruction : public FixedOperandInstruction<1> {
 public:
   template <typename... Arguments>
-  static EvmU256MulResultInstruction *create(Arguments &&...Args) {
-    return FixedOperandInstruction::create<EvmU256MulResultInstruction>(
+  static EvmUrem128By64Instruction *create(Arguments &&...Args) {
+    return FixedOperandInstruction::create<EvmUrem128By64Instruction>(
         std::forward<Arguments>(Args)...);
   }
 
   static bool classof(const MInstruction *Instr) {
-    return Instr->getKind() == EVM_U256_MUL_RESULT;
+    return Instr->getKind() == EVM_UREM128_BY64;
   }
-
-  const MInstruction *getMulInst() const { return getOperand<0>(); }
-  uint32_t getResultIdx() const { return ResultIdx; }
 
 private:
   friend class FixedOperandInstruction;
-  EvmU256MulResultInstruction(MType *Type, MInstruction *MulInst,
-                              uint32_t ResultIdx)
-      : UnaryInstruction(MInstruction::EVM_U256_MUL_RESULT,
-                         OP_evm_u256_mul_result, Type, MulInst),
-        ResultIdx(ResultIdx) {}
-
-  uint32_t ResultIdx = 0;
+  EvmUrem128By64Instruction(MType *Type, MInstruction *DivInst)
+      : FixedOperandInstruction(MInstruction::EVM_UREM128_BY64,
+                                OP_evm_urem128_by64, 1, Type) {
+    setOperand<0>(DivInst);
+  }
 };
 
 } // namespace COMPILER

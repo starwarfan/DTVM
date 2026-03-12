@@ -787,6 +787,15 @@ private:
   MInstruction *createEvmUmul128(MInstruction *LHS, MInstruction *RHS);
   MInstruction *createEvmUmul128Hi(MInstruction *MulInst);
 
+  // Helper functions for inline U256/U64 division
+  MInstruction *createEvmUdiv128By64(MInstruction *Hi, MInstruction *Lo,
+                                     MInstruction *Divisor);
+  MInstruction *createEvmUrem128By64(MInstruction *DivInst);
+  Operand handleDivU64Divisor(const Operand &DividendOp, uint64_t Divisor);
+  Operand handleModU64Divisor(const Operand &DividendOp, uint64_t Divisor);
+  Operand handleDivU64Dividend(uint64_t Dividend, const Operand &DivisorOp);
+  Operand handleModU64Dividend(uint64_t Dividend, const Operand &DivisorOp);
+
   // ==================== EVM to MIR Opcode Mapping ====================
 
   Opcode getMirOpcode(BinaryOperator BinOpr);

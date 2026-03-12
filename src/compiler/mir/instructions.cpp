@@ -200,21 +200,13 @@ void MInstruction::print(llvm::raw_ostream &OS) const {
     OS << getOpcodeString(_opcode) << " (" << getOperand<0>() << ')';
     break;
   }
-  case EVM_U256_MUL: {
-    OS << getOpcodeString(_opcode) << " (";
-    for (OperandNum I = 0; I < getNumOperands(); ++I) {
-      OS << getOperand(I);
-      if (I != getNumOperands() - 1) {
-        OS << ", ";
-      }
-    }
-    OS << ')';
+  case EVM_UDIV128_BY64: {
+    OS << getOpcodeString(_opcode) << " (" << getOperand<0>() << ", "
+       << getOperand<1>() << ", " << getOperand<2>() << ')';
     break;
   }
-  case EVM_U256_MUL_RESULT: {
-    auto *MulResult = llvm::cast<EvmU256MulResultInstruction>(this);
-    OS << getOpcodeString(_opcode) << " (" << MulResult->getMulInst()
-       << ", idx = " << MulResult->getResultIdx() << ')';
+  case EVM_UREM128_BY64: {
+    OS << getOpcodeString(_opcode) << " (" << getOperand<0>() << ')';
     break;
   }
   case WASM_CHECK: {
