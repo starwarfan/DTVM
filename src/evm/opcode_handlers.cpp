@@ -13,6 +13,8 @@
 thread_local zen::evm::EVMFrame *zen::evm::EVMResource::CurrentFrame = nullptr;
 thread_local zen::evm::InterpreterExecContext
     *zen::evm::EVMResource::CurrentContext = nullptr;
+thread_local const evmc_instruction_metrics
+    *zen::evm::EVMResource::CurrentMetricsTable = nullptr;
 
 using namespace zen;
 using namespace zen::evm;
@@ -35,23 +37,17 @@ evmc_revision currentRevision() {
 
 #define DEFINE_CALCULATE_GAS(OpName, OpCode)                                   \
   template <> uint64_t OpName##Handler::calculateGas() {                       \
-    static auto Table = evmc_get_instruction_metrics_table(currentRevision()); \
-    static const auto Cost = Table[OpCode].gas_cost;                           \
-    return Cost;                                                               \
+    return EVMResource::getMetricsTable()[OpCode].gas_cost;                    \
   }
 
 #define DEFINE_NOT_TEMPLATE_CALCULATE_GAS(OpName, OpCode)                      \
   uint64_t OpName##Handler::calculateGas() {                                   \
-    static auto Table = evmc_get_instruction_metrics_table(currentRevision()); \
-    static const auto Cost = Table[OpCode].gas_cost;                           \
-    return Cost;                                                               \
+    return EVMResource::getMetricsTable()[OpCode].gas_cost;                    \
   }
 
 #define DEFINE_MULTICODE_NOT_TEMPLATE_CALCULATE_GAS(OpName)                    \
   uint64_t OpName##Handler::calculateGas() {                                   \
-    static auto Table = evmc_get_instruction_metrics_table(currentRevision()); \
-    static const auto Cost = Table[OpCode].gas_cost;                           \
-    return Cost;                                                               \
+    return EVMResource::getMetricsTable()[OpCode].gas_cost;                    \
   }
 
 /* ---------- Define gas cost macros end ---------- */
@@ -1156,8 +1152,8 @@ void CreateHandler::doExecute() {
     return;
   }
 
-  if (intx::be::load<intx::uint256>(
-          Frame->Host->get_balance(Frame->Msg.recipient)) < Value) {
+  if (Value != 0 && intx::be::load<intx::uint256>(Frame->Host->get_balance(
+                        Frame->Msg.recipient)) < Value) {
     Context->setStatus(EVMC_SUCCESS); // "Light" failure
     return;
   }
@@ -1197,15 +1193,13 @@ void CreateHandler::doExecute() {
   }
   Context->getInstance()->addGasRefund(Result.gas_refund);
 
-  if (Result.status_code == EVMC_REVERT) {
-    Context->setReturnData(std::vector<uint8_t>(
-        Result.output_data, Result.output_data + Result.output_size));
-  } else {
-    Context->clearReturnData();
-  }
   if (Result.status_code == EVMC_SUCCESS) {
+    Context->setReturnData(std::vector<uint8_t>());
     Frame->pop(); // pop the assume value
     Frame->push(intx::be::load<intx::uint256>(Result.create_address));
+  } else {
+    Context->setReturnData(std::vector<uint8_t>(
+        Result.output_data, Result.output_data + Result.output_size));
   }
   Context->setStatus(EVMC_SUCCESS);
 }
@@ -1306,7 +1300,7 @@ void CallHandler::doExecute() {
     }
   }
 
-  uint64_t CallGas = static_cast<uint64_t>(Gas);
+  uint64_t CallGas = uint256ToUint64(Gas);
   uint64_t GasLeft = (uint64_t)Frame->Msg.gas;
   if (Rev >= EVMC_TANGERINE_WHISTLE) {
     const uint64_t GasCap = GasLeft - GasLeft / 64;
@@ -1484,6 +1478,7 @@ void SelfDestructHandler::doExecute() {
   }
 
   Context->setStatus(EVMC_SUCCESS);
+  Context->setReturnData(std::vector<uint8_t>());
   // Return remaining gas to parent frame before freeing current frame.
   uint64_t RemainingGas = Frame->Msg.gas;
   Context->freeBackFrame();

@@ -47,11 +47,18 @@ class EVMResource {
 public:
   static thread_local EVMFrame *CurrentFrame;
   static thread_local InterpreterExecContext *CurrentContext;
+  static thread_local const evmc_instruction_metrics *CurrentMetricsTable;
 
   static void setExecutionContext(EVMFrame *Frame,
                                   InterpreterExecContext *Context) {
     CurrentFrame = Frame;
     CurrentContext = Context;
+  }
+  static void setMetricsTable(const evmc_instruction_metrics *Table) {
+    CurrentMetricsTable = Table;
+  }
+  static const evmc_instruction_metrics *getMetricsTable() {
+    return CurrentMetricsTable;
   }
   static EVMFrame *getCurFrame() { return CurrentFrame; }
   static InterpreterExecContext *getInterpreterExecContext() {

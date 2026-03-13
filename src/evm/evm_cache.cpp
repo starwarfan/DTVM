@@ -48,6 +48,7 @@ static bool isGasChunkTerminator(uint8_t OpcodeU8) {
   case evmc_opcode::OP_JUMP:
   case evmc_opcode::OP_JUMPI:
   case evmc_opcode::OP_GAS:
+  case evmc_opcode::OP_SSTORE:
   case evmc_opcode::OP_CREATE:
   case evmc_opcode::OP_CREATE2:
   case evmc_opcode::OP_CALL:
