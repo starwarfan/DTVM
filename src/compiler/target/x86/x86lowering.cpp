@@ -3,6 +3,7 @@
 #include "compiler/target/x86/x86lowering.h"
 #include "compiler/target/x86/x86_constants.h"
 #include "compiler/utils/array.h"
+#include <array>
 
 using namespace COMPILER;
 using namespace llvm;
@@ -10,6 +11,31 @@ using namespace llvm;
 X86CgLowering::X86CgLowering(CgFunction &MF)
     : CgLowering(MF), Subtarget(&MF.getSubtarget<X86Subtarget>()),
       TRI(Subtarget->getRegisterInfo()) {
+  llvm::DenseSet<const MInstruction *> Visited;
+  auto CollectUmul128Hi = [&](auto &&Self, const MInstruction *Inst) -> void {
+    if (Inst == nullptr || !Visited.insert(Inst).second) {
+      return;
+    }
+
+    if (Inst->getKind() == MInstruction::EVM_UMUL128_HI) {
+      Umul128NeedHi.insert(Inst->getOperand<0>());
+    }
+
+    if (const auto *ICall = llvm::dyn_cast<ICallInstruction>(Inst)) {
+      Self(Self, ICall->getCalleeAddr());
+    }
+
+    for (OperandNum I = 0; I < Inst->getNumOperands(); ++I) {
+      Self(Self, Inst->getOperand(I));
+    }
+  };
+
+  for (MBasicBlock *MIRBB : _mir_func) {
+    for (MInstruction *Inst : *MIRBB) {
+      CollectUmul128Hi(CollectUmul128Hi, Inst);
+    }
+  }
+
   lower();
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
   llvm::dbgs() << "\n########## CgIR Dump After Lowering (Instruction "
@@ -968,7 +994,6 @@ X86CgLowering::lowerEvmUmul128Expr(const EvmUmul128Instruction &Inst) {
   MF->createCgInstruction(*CurBB, TII.get(X86::MUL64r), MULOperands);
 
   CgRegister LoReg = createReg(&X86::GR64RegClass);
-  CgRegister HiReg = createReg(&X86::GR64RegClass);
 
   // Copy result from physical registers to virtual registers
   SmallVector<CgOperand, 2> CopyLoOperands{
@@ -977,13 +1002,17 @@ X86CgLowering::lowerEvmUmul128Expr(const EvmUmul128Instruction &Inst) {
   };
   MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY), CopyLoOperands);
 
-  SmallVector<CgOperand, 2> CopyHiOperands{
-      CgOperand::createRegOperand(HiReg, true),
-      CgOperand::createRegOperand(X86::RDX, false),
-  };
-  MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY), CopyHiOperands);
+  if (Umul128NeedHi.contains(&Inst)) {
+    CgRegister HiReg = createReg(&X86::GR64RegClass);
+    SmallVector<CgOperand, 2> CopyHiOperands{
+        CgOperand::createRegOperand(HiReg, true),
+        CgOperand::createRegOperand(X86::RDX, false),
+    };
+    MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY),
+                            CopyHiOperands);
+    Umul128HiRegs[&Inst] = HiReg;
+  }
 
-  Umul128HiRegs[&Inst] = HiReg;
   return LoReg;
 }
 
@@ -994,6 +1023,131 @@ X86CgLowering::lowerEvmUmul128HiExpr(const EvmUmul128HiInstruction &Inst) {
   auto It = Umul128HiRegs.find(MulInst);
   ZEN_ASSERT(It != Umul128HiRegs.end());
   return It->second;
+}
+
+CgRegister
+X86CgLowering::lowerEvmU256MulExpr(const EvmU256MulInstruction &Inst) {
+  static constexpr size_t NumLimbs = 4;
+  const TargetRegisterClass *RC = &X86::GR64RegClass;
+  CgRegister ZeroReg = X86MaterializeInt(0, MVT::i64);
+
+  std::array<CgRegister, NumLimbs> A = {};
+  std::array<CgRegister, NumLimbs> B = {};
+  for (size_t I = 0; I < NumLimbs; ++I) {
+    A[I] = lowerExpr(*Inst.getOperand(I));
+    B[I] = lowerExpr(*Inst.getOperand(NumLimbs + I));
+  }
+
+  auto emitMul64 = [&](CgRegister LHSReg, CgRegister RHSReg,
+                       bool NeedHigh) -> std::pair<CgRegister, CgRegister> {
+    SmallVector<CgOperand, 2> CopyToRAXOperands{
+        CgOperand::createRegOperand(X86::RAX, true),
+        CgOperand::createRegOperand(LHSReg, false),
+    };
+    MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY),
+                            CopyToRAXOperands);
+
+    SmallVector<CgOperand, 1> MulOperands{
+        CgOperand::createRegOperand(RHSReg, false),
+    };
+    MF->createCgInstruction(*CurBB, TII.get(X86::MUL64r), MulOperands);
+
+    CgRegister LoReg = createReg(RC);
+    SmallVector<CgOperand, 2> CopyLoOperands{
+        CgOperand::createRegOperand(LoReg, true),
+        CgOperand::createRegOperand(X86::RAX, false),
+    };
+    MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY),
+                            CopyLoOperands);
+
+    CgRegister HiReg = X86::NoRegister;
+    if (NeedHigh) {
+      HiReg = createReg(RC);
+      SmallVector<CgOperand, 2> CopyHiOperands{
+          CgOperand::createRegOperand(HiReg, true),
+          CgOperand::createRegOperand(X86::RDX, false),
+      };
+      MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY),
+                              CopyHiOperands);
+    }
+    return {LoReg, HiReg};
+  };
+
+  auto addNoCarry = [&](CgRegister LHSReg, CgRegister RHSReg) {
+    return fastEmitInst_rr(X86::ADD64rr, RC, LHSReg, RHSReg);
+  };
+
+  auto addWithCarryCounter = [&](CgRegister SumReg, CgRegister CarryReg,
+                                 CgRegister TermReg) {
+    CgRegister NewSum = fastEmitInst_rr(X86::ADD64rr, RC, SumReg, TermReg);
+    CgRegister NewCarry = fastEmitInst_rr(X86::ADC64rr, RC, CarryReg, ZeroReg);
+    return std::pair<CgRegister, CgRegister>(NewSum, NewCarry);
+  };
+
+  auto [R0, H00] = emitMul64(A[0], B[0], true);
+  auto [L01, H01] = emitMul64(A[0], B[1], true);
+  auto [L10, H10] = emitMul64(A[1], B[0], true);
+
+  CgRegister R1 = H00;
+  CgRegister C1 = ZeroReg;
+  {
+    auto [S1, C1a] = addWithCarryCounter(R1, C1, L01);
+    auto [S2, C1b] = addWithCarryCounter(S1, C1a, L10);
+    R1 = S2;
+    C1 = C1b;
+  }
+
+  auto [L02, H02] = emitMul64(A[0], B[2], true);
+  auto [L11, H11] = emitMul64(A[1], B[1], true);
+  auto [L20, H20] = emitMul64(A[2], B[0], true);
+
+  CgRegister R2 = H01;
+  CgRegister C2 = ZeroReg;
+  {
+    auto [S1, C2a] = addWithCarryCounter(R2, C2, H10);
+    auto [S2, C2b] = addWithCarryCounter(S1, C2a, L02);
+    auto [S3, C2c] = addWithCarryCounter(S2, C2b, L11);
+    auto [S4, C2d] = addWithCarryCounter(S3, C2c, L20);
+    auto [S5, C2e] = addWithCarryCounter(S4, C2d, C1);
+    R2 = S5;
+    C2 = C2e;
+  }
+
+  auto [L03, Unused03] = emitMul64(A[0], B[3], false);
+  auto [L12, Unused12] = emitMul64(A[1], B[2], false);
+  auto [L21, Unused21] = emitMul64(A[2], B[1], false);
+  auto [L30, Unused30] = emitMul64(A[3], B[0], false);
+  (void)Unused03;
+  (void)Unused12;
+  (void)Unused21;
+  (void)Unused30;
+
+  CgRegister R3 = H02;
+  R3 = addNoCarry(R3, H11);
+  R3 = addNoCarry(R3, H20);
+  R3 = addNoCarry(R3, L03);
+  R3 = addNoCarry(R3, L12);
+  R3 = addNoCarry(R3, L21);
+  R3 = addNoCarry(R3, L30);
+  R3 = addNoCarry(R3, C2);
+
+  U256MulResultRegs[&Inst] = {R1, R2, R3};
+  return R0;
+}
+
+CgRegister X86CgLowering::lowerEvmU256MulResultExpr(
+    const EvmU256MulResultInstruction &Inst) {
+  const MInstruction *MulInst = Inst.getMulInst();
+  CgRegister LowReg = lowerExpr(*MulInst);
+  uint32_t ResultIdx = Inst.getResultIdx();
+  if (ResultIdx == 0) {
+    return LowReg;
+  }
+
+  auto It = U256MulResultRegs.find(MulInst);
+  ZEN_ASSERT(It != U256MulResultRegs.end());
+  ZEN_ASSERT(ResultIdx <= It->second.size());
+  return It->second[ResultIdx - 1];
 }
 
 CgRegister X86CgLowering::lowerSelectExpr(const SelectInstruction &Inst) {
@@ -1259,8 +1413,17 @@ void X86CgLowering::lowerBrIfStmt(const BrIfInstruction &Inst) {
   const MInstruction *Operand = Inst.getOperand<0>();
   CgRegister OperandReg = lowerExpr(*Operand);
 
-  // Perform test instruction to determine the operand is zero or not
-  unsigned TESTOpc = Operand->getType()->isI8() ? X86::TEST8rr : X86::TEST32rr;
+  // Perform test instruction to determine whether the operand is zero.
+  unsigned TESTOpc;
+  if (Operand->getType()->isI8()) {
+    TESTOpc = X86::TEST8rr;
+  } else if (Operand->getType()->isI16()) {
+    TESTOpc = X86::TEST16rr;
+  } else if (Operand->getType()->isI64() || Operand->getType()->isPointer()) {
+    TESTOpc = X86::TEST64rr;
+  } else {
+    TESTOpc = X86::TEST32rr;
+  }
   fastEmitNoDefInst_rr(TESTOpc, OperandReg, OperandReg);
 
   // Jump to the true basic block if the operand is not zero

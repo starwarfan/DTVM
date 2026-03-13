@@ -464,6 +464,7 @@ private:
                                           int32_t Offset);
   Operand loadProtectedAddressFieldAsU256(MInstruction *BasePtr,
                                           int32_t Offset);
+  MInstruction *getHostArgScratchPtr(std::size_t ScratchSlot);
 
   template <class T, typename... Arguments>
   T *createInstruction(bool IsStmt, Arguments &&...Args) {
@@ -577,10 +578,6 @@ private:
   U256Inst handleArithmeticRightShift(const U256Inst &Value,
                                       MInstruction *ShiftAmount,
                                       MInstruction *IsLargeShift);
-
-  // Helper functions for inline U256 multiplication
-  MInstruction *createEvmUmul128(MInstruction *LHS, MInstruction *RHS);
-  MInstruction *createEvmUmul128Hi(MInstruction *MulInst);
 
   // ==================== EVM to MIR Opcode Mapping ====================
 
