@@ -1416,11 +1416,11 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMul(Operand MultiplicandOp,
   }
 
   // Phase 4: u64 fast path - one operand fits in u64 (4x1 multiplication)
-  bool AisU64 = MultiplicandOp.isConstU64();
-  bool BisU64 = MultiplierOp.isConstU64();
-  if (AisU64 || BisU64) {
-    const Operand &U256Op = AisU64 ? MultiplierOp : MultiplicandOp;
-    const Operand &U64Op = AisU64 ? MultiplicandOp : MultiplierOp;
+  bool AIsU64 = MultiplicandOp.isConstU64();
+  bool BIsU64 = MultiplierOp.isConstU64();
+  if (AIsU64 || BIsU64) {
+    const Operand &U256Op = AIsU64 ? MultiplierOp : MultiplicandOp;
+    const Operand &U64Op = AIsU64 ? MultiplicandOp : MultiplierOp;
 
     U256Inst A = extractU256Operand(U256Op);
     MType *I64Type = &Ctx.I64Type;

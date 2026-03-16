@@ -245,12 +245,12 @@ public:
 
     // Phase 2: u64 fast path for ADD - share zero const for upper RHS limbs
     if constexpr (Operator == BinaryOperator::BO_ADD) {
-      bool LhsU64 = LHSOp.isConstU64();
-      bool RhsU64 = RHSOp.isConstU64();
-      if (LhsU64 || RhsU64) {
+      bool LHSIsU64 = LHSOp.isConstU64();
+      bool RHSIsU64 = RHSOp.isConstU64();
+      if (LHSIsU64 || RHSIsU64) {
         // ADD is commutative: normalize so the u64 const is on the RHS
-        const Operand &FullOp = LhsU64 ? RHSOp : LHSOp;
-        const Operand &U64Op = LhsU64 ? LHSOp : RHSOp;
+        const Operand &FullOp = LHSIsU64 ? RHSOp : LHSOp;
+        const Operand &U64Op = LHSIsU64 ? LHSOp : RHSOp;
         return handleAddU64Const(FullOp, U64Op);
       }
     }
