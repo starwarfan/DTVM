@@ -233,16 +233,60 @@ jobs:
         run: |
           ./tools/format.sh check
       - name: Build and Test
+        env:
+          LLVM_SYS_150_PREFIX: /opt/llvm15
+          CMAKE_BUILD_TARGET: Release
+          ENABLE_ASAN: "true"
+          RUN_MODE: multipass
+          INPUT_FORMAT: evm
+          CPU_EXCEPTION_TYPE: cpu
+          TestSuite: evmonetestsuite
         run: |
           echo "current home is $HOME"
-          export LLVM_SYS_150_PREFIX=/opt/llvm15
           export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
           export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
-          export CMAKE_BUILD_TARGET=Release
-          export ENABLE_ASAN=true
-          export RUN_MODE=multipass
-          export CPU_EXCEPTION_TYPE='cpu'
-          export TestSuite=evmonetestsuite
+
+          bash .ci/run_test_suite.sh
+
+  build_test_release_evmone_statetests_on_x86:
+    name: Test DTVM-EVM multipass and interpreter using evmone statetests in release mode on x86-64
+    timeout-minutes: 300
+    runs-on: ubuntu-latest
+    container:
+      image: dtvmdev1/dtvm-dev-x64:main
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+        with:
+          submodules: "true"
+      - name: Cache Hunter
+        uses: actions/cache@v4
+        with:
+          path: /github/home/.hunter
+          key: ${{ runner.os }}-hunter-evmone-v1-${{ hashFiles('.ci/run_test_suite.sh', '.github/workflows/dtvm_evm_test_x86.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-hunter-evmone-v1-
+      - name: Code Format Check
+        run: |
+          ./tools/format.sh check
+      - name: Build and Test
+        env:
+          LLVM_SYS_150_PREFIX: /opt/llvm15
+          CMAKE_BUILD_TARGET: Release
+          ENABLE_ASAN: "false"
+          RUN_MODE: multipass
+          INPUT_FORMAT: evm
+          ENABLE_LAZY: "false"
+          ENABLE_MULTITHREAD: "true"
+          ENABLE_GAS_METER: "true"
+          CPU_EXCEPTION_TYPE: cpu
+          TestSuite: evmonestatetestsuite
+          EVMONE_STATETEST_FILTER: fork_Cancun
+          EVMONE_MODE_TIMEOUT_SECONDS: "5400"
+        run: |
+          echo "current home is $HOME"
+          export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
+          export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
 
           bash .ci/run_test_suite.sh
 

@@ -16,6 +16,7 @@
 #include <evmc/evmc.hpp>
 #include <evmc/helpers.h>
 
+#include <cstdlib>
 #include <cstring>
 
 #ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
@@ -67,6 +68,25 @@ struct InstanceGuard {
   ~InstanceGuard();
 
   void release() { ShouldDelete = false; }
+};
+
+// RAII guard for unloading transient modules that must not be persisted in the
+// address-based cache. Destruction order matters: instance guards must run
+// before unloading the module they execute.
+struct ModuleGuard {
+  DTVM *VM;
+  EVMModule *Mod;
+  bool ShouldUnload;
+
+  ModuleGuard(DTVM *VM, EVMModule *Mod, bool ShouldUnload)
+      : VM(VM), Mod(Mod), ShouldUnload(ShouldUnload) {}
+
+  ModuleGuard(const ModuleGuard &) = delete;
+  ModuleGuard &operator=(const ModuleGuard &) = delete;
+
+  ~ModuleGuard();
+
+  void release() { ShouldUnload = false; }
 };
 
 // RAII helper for host context save/restore (exception safety).
@@ -138,6 +158,20 @@ bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
   return true;
 }
 
+bool parseBoolEnvValue(const char *Value, bool &ParsedValue) {
+  if (std::strcmp(Value, "1") == 0 || std::strcmp(Value, "true") == 0 ||
+      std::strcmp(Value, "TRUE") == 0) {
+    ParsedValue = true;
+    return true;
+  }
+  if (std::strcmp(Value, "0") == 0 || std::strcmp(Value, "false") == 0 ||
+      std::strcmp(Value, "FALSE") == 0) {
+    ParsedValue = false;
+    return true;
+  }
+  return false;
+}
+
 // VM interface for DTVM
 struct DTVM : evmc_vm {
   DTVM();
@@ -186,6 +220,14 @@ struct DTVM : evmc_vm {
 InstanceGuard::~InstanceGuard() {
   if (ShouldDelete && Inst && VM && VM->Iso) {
     VM->Iso->deleteEVMInstance(Inst);
+  }
+}
+
+ModuleGuard::~ModuleGuard() {
+  if (ShouldUnload && Mod && VM && VM->RT) {
+    if (!VM->RT->unloadEVMModule(Mod)) {
+      ZEN_LOG_ERROR("failed to unload transient EVM module");
+    }
   }
 }
 
@@ -243,12 +285,37 @@ bool ensureRuntimeAndIsolation(DTVM *VM) {
   return true;
 }
 
+bool shouldUsePersistentModuleCache(const evmc_message *Msg) {
+  // CREATE/CREATE2 initcode and nested execution can change code frequently
+  // and may recurse. Reusing address-keyed cached modules for those cases can
+  // evict a module that is still active on the current execution stack.
+  return Msg != nullptr && Msg->depth == 0 && Msg->kind != EVMC_CREATE &&
+         Msg->kind != EVMC_CREATE2;
+}
+
+EVMModule *loadTransientModule(DTVM *VM, const uint8_t *Code, size_t CodeSize,
+                               evmc_revision Rev) {
+  std::string ModName = "tmp_mod_" + std::to_string(VM->ModCounter++);
+  auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
+  if (!ModRet)
+    return nullptr;
+  return *ModRet;
+}
+
 /// Find or load a cached EVMModule using two-level cache:
 ///   L0 (code pointer+size) -> L1 (address map) -> Cold load.
 /// Shared by both interpreter and multipass paths.
 /// Returns nullptr on failure.
 EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
-                            evmc_revision Rev, const evmc_message *Msg) {
+                            evmc_revision Rev, const evmc_message *Msg,
+                            bool &IsTransient) {
+  if (!shouldUsePersistentModuleCache(Msg)) {
+    IsTransient = true;
+    return loadTransientModule(VM, Code, CodeSize, Rev);
+  }
+
+  IsTransient = false;
+
   // L0 disabled: pointer comparison is unsafe when callers reuse addresses
   // for different bytecode (e.g. test frameworks, repeated allocations).
   // Fall through to L1 address-based lookup with content validation.
@@ -297,14 +364,15 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
 }
 
 /// Get or create an EVMInstance for the given module.
-/// For top-level calls (depth == 0), reuses the cached instance if possible.
-/// For nested calls (depth > 0), creates a temporary instance that must be
-/// deleted by the caller after use (caller can check depth > 0).
+/// For cacheable top-level calls, reuses the cached instance if possible.
+/// For nested calls or transient modules, creates a temporary instance that
+/// must be deleted by the caller after use.
 EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev,
-                                 int32_t Depth) {
-  // For nested calls, we need a separate instance because each instance is
-  // bound to a specific Module. The nested call may execute different code.
-  if (Depth > 0) {
+                                 int32_t Depth, bool ReuseCachedInstance) {
+  // Nested calls and transient modules need separate instances because the
+  // execution context is isolated and the module may be unloaded immediately
+  // after the call returns.
+  if (Depth > 0 || !ReuseCachedInstance) {
     auto InstRet = VM->Iso->createEVMInstance(*Mod, 0);
     if (!InstRet)
       return nullptr;
@@ -349,20 +417,27 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   }
 
   // Module lookup: L1 address-based cache -> Cold load
-  EVMModule *Mod = findModuleCached(VM, Code, CodeSize, Rev, Msg);
+  bool IsTransientMod = false;
+  EVMModule *Mod =
+      findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
   if (!Mod) {
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
+  ModuleGuard ModGuard(VM, Mod, IsTransientMod);
 
-  // Instance reuse (shared for top-level, temporary for nested)
-  EVMInstance *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
+  const bool ReuseCachedInstance = !IsTransientMod && Msg->depth == 0;
+  const bool DeleteInstanceAfterCall = Msg->depth > 0 || !ReuseCachedInstance;
+
+  // Instance reuse (shared only for cacheable top-level calls)
+  EVMInstance *TheInst =
+      getOrCreateInstance(VM, Mod, Rev, Msg->depth, ReuseCachedInstance);
   if (!TheInst) {
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
   // RAII guard for exception safety: ensures temporary instance cleanup
   // even if an exception occurs during execution (e.g., std::bad_alloc)
-  InstanceGuard InstGuard(VM, TheInst, Msg->depth > 0);
+  InstanceGuard InstGuard(VM, TheInst, DeleteInstanceAfterCall);
 
   // Trigger bytecodeCache build if not yet done (lazy, cached on module)
   (void)Mod->getBytecodeCache();
@@ -375,11 +450,11 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   TheInst->pushMessage(&MsgWithCode);
 
   // For nested calls, create a new InterpreterExecContext
-  // For top-level calls, reuse cached context
+  // For cacheable top-level calls, reuse cached context
   std::unique_ptr<zen::evm::InterpreterExecContext> TempCtx;
   zen::evm::InterpreterExecContext *CtxPtr = nullptr;
-  if (Msg->depth > 0) {
-    // Nested call: create temporary context
+  if (!ReuseCachedInstance) {
+    // Nested call or transient module: create temporary context
     TempCtx = std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
     CtxPtr = TempCtx.get();
   } else {
@@ -450,18 +525,25 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
 #endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 
   // Module lookup: L0 -> L1 -> Cold (shared with interpreter path)
-  EVMModule *Mod = findModuleCached(VM, Code, CodeSize, Rev, Msg);
+  bool IsTransientMod = false;
+  EVMModule *Mod =
+      findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
   if (!Mod) {
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
+  ModuleGuard ModGuard(VM, Mod, IsTransientMod);
 
-  // Instance reuse (shared for top-level, temporary for nested)
-  auto *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
+  const bool ReuseCachedInstance = !IsTransientMod && Msg->depth == 0;
+  const bool DeleteInstanceAfterCall = Msg->depth > 0 || !ReuseCachedInstance;
+
+  // Instance reuse (shared only for cacheable top-level calls)
+  auto *TheInst =
+      getOrCreateInstance(VM, Mod, Rev, Msg->depth, ReuseCachedInstance);
   if (!TheInst) {
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
-  InstanceGuard InstGuard(VM, TheInst, Msg->depth > 0);
+  InstanceGuard InstGuard(VM, TheInst, DeleteInstanceAfterCall);
 
   // Execute via callEVMMain (handles both JIT and interpreter fallback)
   evmc_message Message = *Msg;
@@ -482,7 +564,27 @@ DTVM::DTVM()
     : evmc_vm{EVMC_ABI_VERSION, "dtvm",    PROJECT_VERSION,
               ::destroy,        ::execute, ::get_capabilities,
               ::set_option},
-      ExecHost(new ::WrappedHost) {}
+      ExecHost(new WrappedHost) {
+  if (const char *Mode = std::getenv("DTVM_EVM_MODE"); Mode != nullptr) {
+    if (std::strcmp(Mode, "interpreter") == 0) {
+      Config.Mode = RunMode::InterpMode;
+    } else if (std::strcmp(Mode, "multipass") == 0) {
+      Config.Mode = RunMode::MultipassMode;
+    } else {
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_MODE=%s", Mode);
+    }
+  }
+
+  if (const char *EnableGas = std::getenv("DTVM_EVM_ENABLE_GAS_METERING");
+      EnableGas != nullptr) {
+    bool ParsedEnableGas = false;
+    if (parseBoolEnvValue(EnableGas, ParsedEnableGas)) {
+      Config.EnableEvmGasMetering = ParsedEnableGas;
+    } else {
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_ENABLE_GAS_METERING=%s", EnableGas);
+    }
+  }
+}
 } // namespace
 
 extern "C" evmc_vm *evmc_create_dtvmapi() { return new DTVM; }

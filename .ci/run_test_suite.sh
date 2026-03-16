@@ -73,6 +73,9 @@ case $TestSuite in
     "evmonetestsuite")
         CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_EVM=ON -DZEN_ENABLE_LIBEVM=ON"
         ;;
+    "evmonestatetestsuite")
+        CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_EVM=ON -DZEN_ENABLE_LIBEVM=ON"
+        ;;
     "evmfallbacksuite")
         CMAKE_OPTIONS="$CMAKE_OPTIONS -DZEN_ENABLE_SPEC_TEST=ON -DZEN_ENABLE_ASSEMBLYSCRIPT_TEST=ON -DZEN_ENABLE_EVM=ON -DZEN_ENABLE_LIBEVM=ON -DZEN_ENABLE_JIT_FALLBACK_TEST=ON"
         ;;
@@ -96,6 +99,10 @@ if [[ $RUN_MODE == "interpreter" ]]; then
 fi
 
 if [[ $TestSuite == "evmonetestsuite" ]]; then
+    STACK_TYPES=("-DZEN_ENABLE_VIRTUAL_STACK=ON")
+fi
+
+if [[ $TestSuite == "evmonestatetestsuite" ]]; then
     STACK_TYPES=("-DZEN_ENABLE_VIRTUAL_STACK=ON")
 fi
 
@@ -163,6 +170,108 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             cd evmone
             ./run_unittests.sh ../tests/evmone_unittests/EVMOneMultipassUnitTestsRunList.txt "./libdtvmapi.so,mode=multipass"
             ./run_unittests.sh ../tests/evmone_unittests/EVMOneInterpreterUnitTestsRunList.txt "./libdtvmapi.so,mode=interpreter"
+            ;;
+        "evmonestatetestsuite")
+            EVMONE_REPO=${EVMONE_REPO:-https://github.com/DTVMStack/evmone.git}
+            EVMONE_BRANCH=${EVMONE_BRANCH:-for_test}
+            EVMONE_DIR=${EVMONE_DIR:-evmone-statetest}
+            EVMONE_STATETEST_FILTER=${EVMONE_STATETEST_FILTER:-fork_Cancun}
+            EVMONE_MODE_TIMEOUT_SECONDS=${EVMONE_MODE_TIMEOUT_SECONDS:-5400}
+            WORKSPACE_ROOT=$PWD
+            DTVM_VM_SO=${DTVM_VM_SO:-"$WORKSPACE_ROOT/build/lib/libdtvmapi.so"}
+            EVM_FIXTURES_ROOT=${EVM_FIXTURES_ROOT:-"$WORKSPACE_ROOT/tests/fixtures"}
+            EVM_SPEC_FIXTURES_SUFFIX=${EVM_SPEC_FIXTURES_SUFFIX:-develop}
+            EVM_SPEC_FIXTURES_ARCHIVE="/tmp/fixtures_${EVM_SPEC_FIXTURES_SUFFIX}.tar.gz"
+            EVM_SPEC_FIXTURES_URL=${EVM_SPEC_FIXTURES_URL:-"https://github.com/ethereum/execution-spec-tests/releases/latest/download/fixtures_${EVM_SPEC_FIXTURES_SUFFIX}.tar.gz"}
+            EVMONE_STATETEST_BIN=${EVMONE_STATETEST_BIN:-"$WORKSPACE_ROOT/$EVMONE_DIR/build/bin/evmone-statetest"}
+
+            if [ ! -f "$DTVM_VM_SO" ]; then
+                echo "DTVM VM library not found: $DTVM_VM_SO"
+                ls -la "$WORKSPACE_ROOT/build/lib" | sed -n '1,120p'
+                exit 1
+            fi
+            ln -sf "$DTVM_VM_SO" "$WORKSPACE_ROOT/libdtvmapi.so"
+
+            if [ ! -d "$EVMONE_DIR" ]; then
+                git clone --depth 1 --recurse-submodules -b "$EVMONE_BRANCH" "$EVMONE_REPO" "$EVMONE_DIR"
+            fi
+            cp build/lib/* "$EVMONE_DIR"/
+            if [ ! -f "$EVMONE_DIR/libdtvmapi.so" ]; then
+                DTVM_SO_VERSIONED=$(find "$EVMONE_DIR" -maxdepth 1 -type f -name "libdtvmapi.so.*" | head -n1)
+                if [ -n "$DTVM_SO_VERSIONED" ]; then
+                    ln -sf "$(basename "$DTVM_SO_VERSIONED")" "$EVMONE_DIR/libdtvmapi.so"
+                fi
+            fi
+            cd "$EVMONE_DIR"
+            cmake -S . -B build -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TARGET"
+            cmake --build build --parallel 16
+            EVMONE_STATETEST_BIN="$PWD/build/bin/evmone-statetest"
+            cd "$WORKSPACE_ROOT"
+
+            if [ -z "${EVMONE_STATETEST_PATH:-}" ]; then
+                if [ -d "$EVM_FIXTURES_ROOT/state_tests" ]; then
+                    EVMONE_STATETEST_PATH="$EVM_FIXTURES_ROOT/state_tests"
+                elif [ -d "$EVM_FIXTURES_ROOT/fixtures/state_tests" ]; then
+                    EVMONE_STATETEST_PATH="$EVM_FIXTURES_ROOT/fixtures/state_tests"
+                else
+                    mkdir -p "$EVM_FIXTURES_ROOT"
+                    rm -rf "$EVM_FIXTURES_ROOT/state_tests" "$EVM_FIXTURES_ROOT/fixtures"
+                    rm -f "$EVM_SPEC_FIXTURES_ARCHIVE"
+                    if command -v aria2c >/dev/null 2>&1; then
+                        aria2c -c --max-tries=3 --retry-wait=1 --auto-file-renaming=false \
+                            --dir "$(dirname "$EVM_SPEC_FIXTURES_ARCHIVE")" \
+                            --out "$(basename "$EVM_SPEC_FIXTURES_ARCHIVE")" \
+                            "$EVM_SPEC_FIXTURES_URL"
+                    elif command -v wget >/dev/null 2>&1; then
+                        wget -c --tries=3 --waitretry=1 --max-redirect=20 \
+                            --progress=dot:giga \
+                            -O "$EVM_SPEC_FIXTURES_ARCHIVE" "$EVM_SPEC_FIXTURES_URL"
+                    else
+                        echo "Neither aria2c nor wget is available in CI environment."
+                        exit 1
+                    fi
+                    if [ ! -s "$EVM_SPEC_FIXTURES_ARCHIVE" ]; then
+                        echo "Downloaded archive is missing or empty: $EVM_SPEC_FIXTURES_ARCHIVE"
+                        exit 1
+                    fi
+                    tar -xzf "$EVM_SPEC_FIXTURES_ARCHIVE" -C "$EVM_FIXTURES_ROOT" || true
+                    if [ -d "$EVM_FIXTURES_ROOT/state_tests" ]; then
+                        EVMONE_STATETEST_PATH="$EVM_FIXTURES_ROOT/state_tests"
+                    elif [ -d "$EVM_FIXTURES_ROOT/fixtures/state_tests" ]; then
+                        EVMONE_STATETEST_PATH="$EVM_FIXTURES_ROOT/fixtures/state_tests"
+                    else
+                        EVMONE_STATETEST_PATH=$(find "$EVM_FIXTURES_ROOT" -type d -name state_tests | head -n1)
+                    fi
+                fi
+            fi
+
+            if [ ! -d "$EVMONE_STATETEST_PATH" ]; then
+                echo "State test fixtures not found: $EVMONE_STATETEST_PATH"
+                ls -la "$EVM_FIXTURES_ROOT" | sed -n '1,120p'
+                exit 1
+            fi
+
+            export LD_LIBRARY_PATH="$WORKSPACE_ROOT/build/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            for EVMONE_MODE in multipass interpreter; do
+                VM_ARG="${DTVM_VM_SO},mode=${EVMONE_MODE},enable_gas_metering=true"
+                echo "Running evmone-statetest mode=${EVMONE_MODE}, filter=${EVMONE_STATETEST_FILTER}"
+                if [ -n "$EVMONE_MODE_TIMEOUT_SECONDS" ]; then
+                    timeout --foreground "$EVMONE_MODE_TIMEOUT_SECONDS" env \
+                        DTVM_EVM_MODE="$EVMONE_MODE" \
+                        DTVM_EVM_ENABLE_GAS_METERING=true \
+                        EVMONE_EXTERNAL_OPTIONS="$VM_ARG" \
+                        "$EVMONE_STATETEST_BIN" "$EVMONE_STATETEST_PATH" \
+                        --vm external_vm \
+                        -k "$EVMONE_STATETEST_FILTER"
+                else
+                    env EVMONE_EXTERNAL_OPTIONS="$VM_ARG" \
+                        DTVM_EVM_MODE="$EVMONE_MODE" \
+                        DTVM_EVM_ENABLE_GAS_METERING=true \
+                        "$EVMONE_STATETEST_BIN" "$EVMONE_STATETEST_PATH" \
+                        --vm external_vm \
+                        -k "$EVMONE_STATETEST_FILTER"
+                fi
+            done
             ;;
         "evmfallbacksuite")
             python3 tools/run_evm_tests.py -r build/dtvm $EXTRA_EXE_OPTIONS
