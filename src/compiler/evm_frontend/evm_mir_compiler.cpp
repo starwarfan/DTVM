@@ -1484,88 +1484,20 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMul(Operand MultiplicandOp,
     return Operand(Result, EVMType::UINT256);
   }
 
-  // Full 4x4 schoolbook multiplication
-  // U256 layout: [0]=lo64, [1]=mid-lo, [2]=mid-hi, [3]=hi64
-  //
-  // For 256-bit truncated result, we need products where i+j < 4:
-  //   R[0] = P00_lo
-  //   R[1] = P00_hi + P01_lo + P10_lo
-  //   R[2] = P01_hi + P10_hi + P02_lo + P11_lo + P20_lo
-  //   R[3] = P02_hi + P11_hi + P20_hi + P03_lo + P12_lo + P21_lo + P30_lo
-
+  // General case: use EvmU256MulInstruction for full 4x4 multiplication
   U256Inst A = extractU256Operand(MultiplicandOp);
   U256Inst B = extractU256Operand(MultiplierOp);
-
   MType *I64Type = &Ctx.I64Type;
-  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
 
-  MInstruction *PLo[4][4] = {};
-  MInstruction *PHi[4][4] = {};
-
-  for (size_t I = 0; I < 4; ++I) {
-    for (size_t J = 0; J < 4; ++J) {
-      if (I + J < 4) {
-        PLo[I][J] = createEvmUmul128(A[I], B[J]);
-      }
-      if (I + J < 3) {
-        PHi[I][J] = createEvmUmul128Hi(PLo[I][J]);
-      }
-    }
-  }
-
-  using SumCarryPair = std::pair<MInstruction *, MInstruction *>;
-
-  auto addTermWithCarry = [&](MInstruction *Sum, MInstruction *Carry,
-                              MInstruction *Term) -> SumCarryPair {
-    MInstruction *NewSum =
-        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
-    MInstruction *NewCarry =
-        createInstruction<AdcInstruction>(false, I64Type, Carry, Zero, Zero);
-    return {protectUnsafeValue(NewSum, I64Type),
-            protectUnsafeValue(NewCarry, I64Type)};
-  };
-
-  auto addTermNoCarry = [&](MInstruction *Sum, MInstruction *Term) {
-    MInstruction *NewSum =
-        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
-    return protectUnsafeValue(NewSum, I64Type);
-  };
-
-  MInstruction *R0 = PLo[0][0];
-
-  MInstruction *R1 = PHi[0][0];
-  MInstruction *C1 = Zero;
-  {
-    auto [S1, C1a] = addTermWithCarry(R1, C1, PLo[0][1]);
-    auto [S2, C1b] = addTermWithCarry(S1, C1a, PLo[1][0]);
-    R1 = S2;
-    C1 = C1b;
-  }
-
-  MInstruction *R2 = PHi[0][1];
-  MInstruction *C2 = Zero;
-  {
-    auto [S1, C2a] = addTermWithCarry(R2, C2, PHi[1][0]);
-    auto [S2, C2b] = addTermWithCarry(S1, C2a, PLo[0][2]);
-    auto [S3, C2c] = addTermWithCarry(S2, C2b, PLo[1][1]);
-    auto [S4, C2d] = addTermWithCarry(S3, C2c, PLo[2][0]);
-    auto [S5, C2e] = addTermWithCarry(S4, C2d, C1);
-    R2 = S5;
-    C2 = C2e;
-  }
-
-  MInstruction *R3 = PHi[0][2];
-  {
-    R3 = addTermNoCarry(R3, PHi[1][1]);
-    R3 = addTermNoCarry(R3, PHi[2][0]);
-    R3 = addTermNoCarry(R3, PLo[0][3]);
-    R3 = addTermNoCarry(R3, PLo[1][2]);
-    R3 = addTermNoCarry(R3, PLo[2][1]);
-    R3 = addTermNoCarry(R3, PLo[3][0]);
-    R3 = addTermNoCarry(R3, C2);
-  }
-
-  U256Inst Result = {R0, R1, R2, R3};
+  MInstruction *MulInst = createInstruction<EvmU256MulInstruction>(
+      false, I64Type, A[0], A[1], A[2], A[3], B[0], B[1], B[2], B[3]);
+  U256Inst Result = {MulInst,
+                     createInstruction<EvmU256MulResultInstruction>(
+                         false, I64Type, MulInst, 1),
+                     createInstruction<EvmU256MulResultInstruction>(
+                         false, I64Type, MulInst, 2),
+                     createInstruction<EvmU256MulResultInstruction>(
+                         false, I64Type, MulInst, 3)};
   return Operand(Result, EVMType::UINT256);
 }
 
