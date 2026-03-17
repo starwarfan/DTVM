@@ -194,12 +194,10 @@ public:
   virtual void visitEvmUmul128HiInstruction(EvmUmul128HiInstruction &I) {
     VISIT_OPERAND_1
   }
-  virtual void
-  visitEvmUdiv128By64Instruction(EvmUdiv128By64Instruction &I) {
+  virtual void visitEvmUdiv128By64Instruction(EvmUdiv128By64Instruction &I) {
     VISIT_OPERAND_3
   }
-  virtual void
-  visitEvmUrem128By64Instruction(EvmUrem128By64Instruction &I) {
+  virtual void visitEvmUrem128By64Instruction(EvmUrem128By64Instruction &I) {
     VISIT_OPERAND_1
   }
 

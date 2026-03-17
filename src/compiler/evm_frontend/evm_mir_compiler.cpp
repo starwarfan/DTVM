@@ -1299,8 +1299,8 @@ MInstruction *EVMMirBuilder::createEvmUmul128Hi(MInstruction *MulInst) {
 }
 
 MInstruction *EVMMirBuilder::createEvmUdiv128By64(MInstruction *Hi,
-                                                   MInstruction *Lo,
-                                                   MInstruction *Divisor) {
+                                                  MInstruction *Lo,
+                                                  MInstruction *Divisor) {
   return createInstruction<EvmUdiv128By64Instruction>(
       false, OP_evm_udiv128_by64, &Ctx.I64Type, Hi, Lo, Divisor);
 }
@@ -1365,17 +1365,16 @@ EVMMirBuilder::handleDivU64Dividend(uint64_t Dividend,
 
   // If divisor has any upper limb set, b > a, so DIV = 0
   MInstruction *Upper = createInstruction<BinaryInstruction>(
-      false, OP_or, I64Type,
-      B[1], createInstruction<BinaryInstruction>(
-                false, OP_or, I64Type, B[2], B[3]));
+      false, OP_or, I64Type, B[1],
+      createInstruction<BinaryInstruction>(false, OP_or, I64Type, B[2], B[3]));
   MInstruction *HasUpper = createInstruction<CmpInstruction>(
       false, CmpInstruction::ICMP_NE, &Ctx.I64Type, Upper, Zero);
 
   MInstruction *A0 = createIntConstInstruction(I64Type, Dividend);
   MInstruction *Q64 =
       createInstruction<BinaryInstruction>(false, OP_udiv, I64Type, A0, B[0]);
-  MInstruction *DivResult = createInstruction<SelectInstruction>(
-      false, I64Type, HasUpper, Zero, Q64);
+  MInstruction *DivResult =
+      createInstruction<SelectInstruction>(false, I64Type, HasUpper, Zero, Q64);
 
   U256Inst Result = {DivResult, Zero, Zero, Zero};
   return Operand(Result, EVMType::UINT256);
@@ -1390,17 +1389,16 @@ EVMMirBuilder::handleModU64Dividend(uint64_t Dividend,
   U256Inst B = extractU256Operand(DivisorOp);
 
   MInstruction *Upper = createInstruction<BinaryInstruction>(
-      false, OP_or, I64Type,
-      B[1], createInstruction<BinaryInstruction>(
-                false, OP_or, I64Type, B[2], B[3]));
+      false, OP_or, I64Type, B[1],
+      createInstruction<BinaryInstruction>(false, OP_or, I64Type, B[2], B[3]));
   MInstruction *HasUpper = createInstruction<CmpInstruction>(
       false, CmpInstruction::ICMP_NE, &Ctx.I64Type, Upper, Zero);
 
   MInstruction *A0 = createIntConstInstruction(I64Type, Dividend);
   MInstruction *R64 =
       createInstruction<BinaryInstruction>(false, OP_urem, I64Type, A0, B[0]);
-  MInstruction *ModResult = createInstruction<SelectInstruction>(
-      false, I64Type, HasUpper, A0, R64);
+  MInstruction *ModResult =
+      createInstruction<SelectInstruction>(false, I64Type, HasUpper, A0, R64);
 
   U256Inst Result = {ModResult, Zero, Zero, Zero};
   return Operand(Result, EVMType::UINT256);
@@ -1763,8 +1761,9 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleAddMod(Operand AugendOp,
     intx::uint256 M = u256ValueToIntx(ModulusOp.getConstValue());
     if (M == 0)
       return Operand(U256Value{0, 0, 0, 0});
-    intx::uint512 Sum = intx::uint512(u256ValueToIntx(AugendOp.getConstValue())) +
-                         intx::uint512(u256ValueToIntx(AddendOp.getConstValue()));
+    intx::uint512 Sum =
+        intx::uint512(u256ValueToIntx(AugendOp.getConstValue())) +
+        intx::uint512(u256ValueToIntx(AddendOp.getConstValue()));
     intx::uint256 Result = intx::uint256(Sum % M);
     return Operand(intxToU256Value(Result));
   }

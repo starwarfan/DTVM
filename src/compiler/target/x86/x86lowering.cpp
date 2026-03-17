@@ -1081,8 +1081,8 @@ X86CgLowering::lowerEvmUmul128HiExpr(const EvmUmul128HiInstruction &Inst) {
   return It->second;
 }
 
-CgRegister X86CgLowering::lowerEvmUdiv128By64Expr(
-    const EvmUdiv128By64Instruction &Inst) {
+CgRegister
+X86CgLowering::lowerEvmUdiv128By64Expr(const EvmUdiv128By64Instruction &Inst) {
   const MInstruction *Hi = Inst.getOperand<0>();
   const MInstruction *Lo = Inst.getOperand<1>();
   const MInstruction *Divisor = Inst.getOperand<2>();
@@ -1128,8 +1128,8 @@ CgRegister X86CgLowering::lowerEvmUdiv128By64Expr(
   return QuotientReg;
 }
 
-CgRegister X86CgLowering::lowerEvmUrem128By64Expr(
-    const EvmUrem128By64Instruction &Inst) {
+CgRegister
+X86CgLowering::lowerEvmUrem128By64Expr(const EvmUrem128By64Instruction &Inst) {
   const MInstruction *DivInst = Inst.getOperand<0>();
   (void)lowerExpr(*DivInst);
   auto It = Udiv128RemRegs.find(DivInst);
