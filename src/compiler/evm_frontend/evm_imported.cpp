@@ -42,8 +42,7 @@ struct KeccakCache {
     return nullptr;
   }
 
-  void insert(const uint8_t *Data, uint32_t Len,
-              const evmc::bytes32 &Result) {
+  void insert(const uint8_t *Data, uint32_t Len, const evmc::bytes32 &Result) {
     if (Len > KeccakCacheMaxInputLen)
       return;
     auto &S = Slots[NextSlot];
@@ -1147,8 +1146,7 @@ const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
   auto &ExecCache = Instance->getMessageCache();
 
   uint32_t Len32 = static_cast<uint32_t>(Length);
-  if (const evmc::bytes32 *Cached =
-          TLKeccakCache.lookup(InputData, Len32)) {
+  if (const evmc::bytes32 *Cached = TLKeccakCache.lookup(InputData, Len32)) {
     ExecCache.Keccak256Results.push_back(*Cached);
     return ExecCache.Keccak256Results.back().bytes;
   }
