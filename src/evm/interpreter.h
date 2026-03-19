@@ -71,6 +71,10 @@ class InterpreterExecContext {
 private:
   runtime::EVMInstance *Inst;
   std::vector<EVMFrame> FrameStack;
+  // Number of logically active frames.  May be less than FrameStack.size()
+  // because we keep previously-allocated EVMFrame objects alive to avoid
+  // re-zeroing the 32 KB uint256 stack array on every call.
+  size_t FrameCount = 0;
   evmc_status_code Status = EVMC_SUCCESS;
   std::vector<uint8_t> ReturnData;
   evmc::Result ExeResult;
@@ -82,11 +86,13 @@ public:
     FrameStack.reserve(1024); // max call depth
   }
 
-  /// Reset state for reuse across calls. Keeps allocated capacity to avoid
-  /// re-allocating the ~32KB EVMFrame on every call.
+  /// Reset state for reuse across calls. Keeps allocated EVMFrame objects
+  /// (and their 32 KB stack arrays) alive so that the next allocTopFrame()
+  /// only needs to reset a few scalar fields instead of zero-initializing
+  /// the entire array.
   void resetForNewCall(runtime::EVMInstance *NewInst) {
     Inst = NewInst;
-    FrameStack.clear(); // keeps vector capacity
+    FrameCount = 0; // logically empty, but frames stay allocated
     Status = EVMC_SUCCESS;
     ReturnData.clear(); // keeps vector capacity
     IsJump = false;
@@ -97,10 +103,10 @@ public:
   void freeBackFrame();
 
   EVMFrame *getCurFrame() {
-    if (FrameStack.empty()) {
+    if (FrameCount == 0) {
       return nullptr;
     }
-    return &FrameStack.back();
+    return &FrameStack[FrameCount - 1];
   }
 
   runtime::EVMInstance *getInstance() { return Inst; }
