@@ -89,6 +89,8 @@ struct HostContextScope {
 
 // ---- Address-based module cache types ----
 
+static constexpr size_t MAX_MODULE_CACHE_SIZE = 4096;
+
 struct CodeAddrRevKey {
   evmc_address Addr;
   evmc_revision Rev;
@@ -168,7 +170,7 @@ struct DTVM : evmc_vm {
     // Unload all address-cached modules
     if (RT) {
       for (auto &P : AddrCache) {
-        if (!RT->unloadEVMModule(P.second)) {
+        if (!RT->unloadEVMModule(P.second.first)) {
           ZEN_LOG_ERROR("failed to unload EVM module");
         }
       }
@@ -189,10 +191,17 @@ struct DTVM : evmc_vm {
   const uint8_t *LastCodePtr = nullptr;
   size_t LastCodeSize = 0;
   EVMModule *L0Mod = nullptr;
-  // L1: address-based cache map (code_address + rev -> module)
-  std::unordered_map<CodeAddrRevKey, EVMModule *, CodeAddrRevHash,
-                     CodeAddrRevEqual>
+
+  // L1: address-based LRU cache (code_address + rev -> module)
+  // LRUOrder tracks access recency: front = most recent, back = least recent.
+  // AddrCache maps key -> (module, iterator into LRUOrder) for O(1) lookup
+  // and O(1) LRU maintenance via std::list::splice.
+  using LRUList = std::list<CodeAddrRevKey>;
+  LRUList LRUOrder;
+  std::unordered_map<CodeAddrRevKey, std::pair<EVMModule *, LRUList::iterator>,
+                     CodeAddrRevHash, CodeAddrRevEqual>
       AddrCache;
+
   uint64_t ModCounter = 0;
   // Cached EVMInstance to avoid alloc/free (~33KB) on every call
   EVMInstance *CachedMainInst = nullptr;
@@ -200,6 +209,16 @@ struct DTVM : evmc_vm {
   std::unique_ptr<zen::evm::InterpreterExecContext> CachedCtx;
   // Instance pool for depth > 0
   std::vector<EVMInstance *> CacheInsts;
+
+  bool isModuleInUse(const EVMModule *Mod) const {
+    if (CachedMainInst && CachedMainInst->getModule() == Mod)
+      return true;
+    for (const auto *Inst : CacheInsts) {
+      if (Inst && Inst->getModule() == Mod)
+        return true;
+    }
+    return false;
+  }
 };
 
 ModuleGuard::~ModuleGuard() {
@@ -265,10 +284,14 @@ bool ensureRuntimeAndIsolation(DTVM *VM) {
 }
 
 bool shouldUsePersistentModuleCache(const evmc_message *Msg) {
-  // CREATE/CREATE2 initcode and nested execution can change code frequently
-  // and may recurse. Reusing address-keyed cached modules for those cases can
-  // evict a module that is still active on the current execution stack.
-  return Msg != nullptr && Msg->depth == 0 && Msg->kind != EVMC_CREATE &&
+  // CREATE/CREATE2 initcode must not be cached: the same address can receive
+  // different initcode across transactions, and initcode is one-shot.
+  // Regular calls (CALL/DELEGATECALL/STATICCALL/CALLCODE) at any depth are
+  // safe to cache: EVM guarantees that deployed code at a given address is
+  // immutable. The module is keyed by (code_address, revision) and a
+  // defense-in-depth head/tail validation is performed before reuse. Each
+  // nested call gets its own EVMInstance so reentrancy is safe.
+  return Msg != nullptr && Msg->kind != EVMC_CREATE &&
          Msg->kind != EVMC_CREATE2;
 }
 
@@ -301,28 +324,50 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
 
   EVMModule *Mod = nullptr;
 
-  // L1: Address-based map lookup
+  // L1: Address-based LRU cache lookup
   CodeAddrRevKey AddrKey{Msg->code_address, Rev};
   auto It = VM->AddrCache.find(AddrKey);
   if (It != VM->AddrCache.end() &&
-      validateCodeMatch(Code, CodeSize, It->second)) {
-    Mod = It->second;
+      validateCodeMatch(Code, CodeSize, It->second.first)) {
+    Mod = It->second.first;
+    // LRU touch: move to front (most recently used)
+    VM->LRUOrder.splice(VM->LRUOrder.begin(), VM->LRUOrder, It->second.second);
   } else {
     // Cold path: full module load
     // If validation failed for an existing entry, evict the stale module
     if (It != VM->AddrCache.end()) {
-      EVMModule *OldMod = It->second;
+      EVMModule *OldMod = It->second.first;
       if (VM->L0Mod == OldMod && Msg->depth == 0)
         VM->L0Mod = nullptr;
       VM->RT->unloadEVMModule(OldMod);
+      VM->LRUOrder.erase(It->second.second);
       VM->AddrCache.erase(It);
     }
+
+    // LRU eviction: if cache is at capacity, evict least recently used
+    while (VM->AddrCache.size() >= MAX_MODULE_CACHE_SIZE &&
+           !VM->LRUOrder.empty()) {
+      auto &VictimKey = VM->LRUOrder.back();
+      auto VictimIt = VM->AddrCache.find(VictimKey);
+      if (VictimIt != VM->AddrCache.end()) {
+        EVMModule *VictimMod = VictimIt->second.first;
+        if (VM->isModuleInUse(VictimMod))
+          break; // never evict a module referenced by an active instance
+        if (VM->L0Mod == VictimMod)
+          VM->L0Mod = nullptr;
+        VM->RT->unloadEVMModule(VictimMod);
+        VM->AddrCache.erase(VictimIt);
+      }
+      VM->LRUOrder.pop_back();
+    }
+
     std::string ModName = "mod_" + std::to_string(VM->ModCounter++);
     auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
     if (!ModRet)
       return nullptr;
     Mod = *ModRet;
-    VM->AddrCache[AddrKey] = Mod;
+    VM->LRUOrder.push_front(AddrKey);
+    VM->AddrCache[AddrKey] = {Mod, VM->LRUOrder.begin()};
   }
 
   // Update L0 cache members. Even though L0 lookup is disabled, we maintain
@@ -429,7 +474,6 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   TheInst->pushMessage(&MsgWithCode);
 
   const bool ReuseCachedInstance = !IsTransientMod && Msg->depth == 0;
-  const bool DeleteInstanceAfterCall = Msg->depth > 0 || !ReuseCachedInstance;
 
   // For nested calls, create a new InterpreterExecContext
   // For cacheable top-level calls, reuse cached context
