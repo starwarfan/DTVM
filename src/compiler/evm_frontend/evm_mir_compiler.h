@@ -149,6 +149,10 @@ public:
 
     bool isU256MultiComponent() const { return IsU256MultiComponent; }
     bool isConstant() const { return IsConstant; }
+    bool isConstU64() const {
+      return IsConstant && ConstValue[1] == 0 && ConstValue[2] == 0 &&
+             ConstValue[3] == 0;
+    }
 
     const U256Inst &getU256Components() const {
       ZEN_ASSERT(IsU256MultiComponent && "Not a multi-component U256");
@@ -224,6 +228,40 @@ public:
 
   template <BinaryOperator Operator>
   Operand handleBinaryArithmetic(const Operand &LHSOp, const Operand &RHSOp) {
+    // Phase 0: Constant folding
+    if (LHSOp.isConstant() && RHSOp.isConstant()) {
+      intx::uint256 L = u256ValueToIntx(LHSOp.getConstValue());
+      intx::uint256 R = u256ValueToIntx(RHSOp.getConstValue());
+      intx::uint256 Res;
+      if constexpr (Operator == BinaryOperator::BO_ADD) {
+        Res = L + R;
+      } else if constexpr (Operator == BinaryOperator::BO_SUB) {
+        Res = L - R;
+      } else {
+        ZEN_ASSERT_TODO();
+      }
+      return Operand(intxToU256Value(Res));
+    }
+
+    // Phase 2: u64 fast path for ADD - share zero const for upper RHS limbs
+    if constexpr (Operator == BinaryOperator::BO_ADD) {
+      bool LHSIsU64 = LHSOp.isConstU64();
+      bool RHSIsU64 = RHSOp.isConstU64();
+      if (LHSIsU64 || RHSIsU64) {
+        // ADD is commutative: normalize so the u64 const is on the RHS
+        const Operand &FullOp = LHSIsU64 ? RHSOp : LHSOp;
+        const Operand &U64Op = LHSIsU64 ? LHSOp : RHSOp;
+        return handleAddU64Const(FullOp, U64Op);
+      }
+    }
+
+    // Phase 2: u64 fast path for SUB (only when RHS is u64 const)
+    if constexpr (Operator == BinaryOperator::BO_SUB) {
+      if (RHSOp.isConstU64()) {
+        return handleSubU64Const(LHSOp, RHSOp);
+      }
+    }
+
     U256Inst Result = {};
     U256Inst LHS = extractU256Operand(LHSOp);
     U256Inst RHS = extractU256Operand(RHSOp);
@@ -231,21 +269,10 @@ public:
         EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
 
     if constexpr (Operator == BinaryOperator::BO_ADD) {
-      // u256 in little-endian order: [low64, mid64_1, mid64_2, high64]
-
-      // The carry here is only used for constructing the adc instruction.
-      // We currently use adc only in bo_add, and since we can guarantee the
-      // instructions are consecutive, there's no need to compute the carry
-      // in DMIR.
       MInstruction *Carry = createIntConstInstruction(MirI64Type, 0);
 
       // Pre-materialize all operand components into variables before the
-      // ADD/ADC carry chain. This ensures that during x86 lowering, no
-      // flag-modifying instructions (e.g. ADD for address computation in
-      // BYTES32-to-U256 conversion) are emitted between the ADD and ADC
-      // instructions that form the carry chain. Without this, lazy expression
-      // lowering of operands like BSWAP(LOAD(ADD(ptr, offset))) would emit
-      // x86 ADD instructions that clobber the carry flag (CF).
+      // ADD/ADC carry chain to prevent flag-clobbering during x86 lowering.
       for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
         LHS[I] = protectUnsafeValue(LHS[I], MirI64Type);
         RHS[I] = protectUnsafeValue(RHS[I], MirI64Type);
@@ -253,13 +280,10 @@ public:
 
       for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
         if (I == 0) {
-          // First component: use regular ADD without carry
           MInstruction *LocalResult = createInstruction<BinaryInstruction>(
               false, OP_add, MirI64Type, LHS[I], RHS[I]);
           Result[I] = protectUnsafeValue(LocalResult, MirI64Type);
         } else {
-          // Subsequent components: use ADC (without carry)
-          // The carry here is only used for constructing the adc instruction.
           MInstruction *LocalResult = createInstruction<AdcInstruction>(
               false, MirI64Type, LHS[I], RHS[I], Carry);
           Result[I] = protectUnsafeValue(LocalResult, MirI64Type);
@@ -286,14 +310,10 @@ public:
 
       for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
         if (I == 0) {
-          // First component: use regular SUB without borrow
           MInstruction *LocalResult = createInstruction<BinaryInstruction>(
               false, OP_sub, MirI64Type, LHS[I], RHS[I]);
           Result[I] = protectUnsafeValue(LocalResult, MirI64Type);
         } else {
-          // Subsequent components: use SBB (without borrow)
-          // The borrow here is only used for constructing the sbb
-          // instruction.
           MInstruction *LocalResult = createInstruction<SbbInstruction>(
               false, MirI64Type, LHS[I], RHS[I], Borrow);
           Result[I] = protectUnsafeValue(LocalResult, MirI64Type);
@@ -316,6 +336,72 @@ public:
   Operand handleExp(Operand BaseOp, Operand ExponentOp);
   template <CompareOperator Operator>
   Operand handleCompareOp(Operand LHSOp, Operand RHSOp) {
+    // Phase 0: Constant folding
+    if constexpr (Operator == CompareOperator::CO_EQZ) {
+      if (LHSOp.isConstant()) {
+        const auto &V = LHSOp.getConstValue();
+        uint64_t R = (V[0] == 0 && V[1] == 0 && V[2] == 0 && V[3] == 0) ? 1 : 0;
+        return Operand(U256Value{R, 0, 0, 0});
+      }
+    } else {
+      if (LHSOp.isConstant() && RHSOp.isConstant()) {
+        intx::uint256 L = u256ValueToIntx(LHSOp.getConstValue());
+        intx::uint256 R = u256ValueToIntx(RHSOp.getConstValue());
+        uint64_t Res = 0;
+        if constexpr (Operator == CompareOperator::CO_EQ) {
+          Res = (L == R) ? 1 : 0;
+        } else if constexpr (Operator == CompareOperator::CO_LT) {
+          Res = (L < R) ? 1 : 0;
+        } else if constexpr (Operator == CompareOperator::CO_GT) {
+          Res = (L > R) ? 1 : 0;
+        } else if constexpr (Operator == CompareOperator::CO_LT_S) {
+          bool Lneg = (LHSOp.getConstValue()[3] >> 63) != 0;
+          bool Rneg = (RHSOp.getConstValue()[3] >> 63) != 0;
+          if (Lneg != Rneg) {
+            Res = Lneg ? 1 : 0;
+          } else {
+            Res = (L < R) ? 1 : 0;
+          }
+        } else if constexpr (Operator == CompareOperator::CO_GT_S) {
+          bool Lneg = (LHSOp.getConstValue()[3] >> 63) != 0;
+          bool Rneg = (RHSOp.getConstValue()[3] >> 63) != 0;
+          if (Lneg != Rneg) {
+            Res = Rneg ? 1 : 0;
+          } else {
+            Res = (L > R) ? 1 : 0;
+          }
+        }
+        return Operand(U256Value{Res, 0, 0, 0});
+      }
+    }
+
+    // Phase 3: u64 fast path for EQ
+    if constexpr (Operator == CompareOperator::CO_EQ) {
+      if (LHSOp.isConstU64() || RHSOp.isConstU64()) {
+        const Operand &U64Op = LHSOp.isConstU64() ? LHSOp : RHSOp;
+        const Operand &OtherOp = LHSOp.isConstU64() ? RHSOp : LHSOp;
+        return handleCompareEqU64(OtherOp, U64Op.getConstValue()[0]);
+      }
+    }
+
+    // Phase 3: u64 fast path for unsigned LT/GT
+    if constexpr (Operator == CompareOperator::CO_LT) {
+      if (RHSOp.isConstU64()) {
+        return handleCompareLtRhsU64(LHSOp, RHSOp.getConstValue()[0]);
+      }
+      if (LHSOp.isConstU64()) {
+        return handleCompareGtRhsU64(RHSOp, LHSOp.getConstValue()[0]);
+      }
+    }
+    if constexpr (Operator == CompareOperator::CO_GT) {
+      if (RHSOp.isConstU64()) {
+        return handleCompareGtRhsU64(LHSOp, RHSOp.getConstValue()[0]);
+      }
+      if (LHSOp.isConstU64()) {
+        return handleCompareLtRhsU64(RHSOp, LHSOp.getConstValue()[0]);
+      }
+    }
+
     U256Inst Result = handleCompareImpl<Operator>(LHSOp, RHSOp, &Ctx.I64Type);
     return Operand(Result, EVMType::UINT256);
   }
@@ -323,6 +409,69 @@ public:
   // EVM bitwise opcode: and, or, xor
   template <BinaryOperator Operator>
   Operand handleBitwiseOp(const Operand &LHSOp, const Operand &RHSOp) {
+    // Phase 0: Constant folding
+    if (LHSOp.isConstant() && RHSOp.isConstant()) {
+      const auto &L = LHSOp.getConstValue();
+      const auto &R = RHSOp.getConstValue();
+      U256Value Res;
+      for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+        if constexpr (Operator == BinaryOperator::BO_AND) {
+          Res[I] = L[I] & R[I];
+        } else if constexpr (Operator == BinaryOperator::BO_OR) {
+          Res[I] = L[I] | R[I];
+        } else if constexpr (Operator == BinaryOperator::BO_XOR) {
+          Res[I] = L[I] ^ R[I];
+        }
+      }
+      return Operand(Res);
+    }
+
+    // Phase 1: u64 fast path for AND - upper limbs are annihilated to 0
+    if constexpr (Operator == BinaryOperator::BO_AND) {
+      if (LHSOp.isConstU64() || RHSOp.isConstU64()) {
+        const Operand &U64Op = LHSOp.isConstU64() ? LHSOp : RHSOp;
+        const Operand &OtherOp = LHSOp.isConstU64() ? RHSOp : LHSOp;
+        U256Inst Other = extractU256Operand(OtherOp);
+        MType *MirI64Type =
+            EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+        MInstruction *U64Val =
+            createIntConstInstruction(MirI64Type, U64Op.getConstValue()[0]);
+        MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
+        U256Inst Result = {};
+        Result[0] =
+            protectUnsafeValue(createInstruction<BinaryInstruction>(
+                                   false, OP_and, MirI64Type, Other[0], U64Val),
+                               MirI64Type);
+        for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+          Result[I] = Zero;
+        }
+        return Operand(Result, EVMType::UINT256);
+      }
+    }
+
+    // Phase 1: u64 fast path for OR/XOR - upper limbs pass through (identity)
+    if constexpr (Operator == BinaryOperator::BO_OR ||
+                  Operator == BinaryOperator::BO_XOR) {
+      if (LHSOp.isConstU64() || RHSOp.isConstU64()) {
+        const Operand &U64Op = LHSOp.isConstU64() ? LHSOp : RHSOp;
+        const Operand &OtherOp = LHSOp.isConstU64() ? RHSOp : LHSOp;
+        U256Inst Other = extractU256Operand(OtherOp);
+        MType *MirI64Type =
+            EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+        MInstruction *U64Val =
+            createIntConstInstruction(MirI64Type, U64Op.getConstValue()[0]);
+        U256Inst Result = {};
+        Result[0] = protectUnsafeValue(
+            createInstruction<BinaryInstruction>(false, getMirOpcode(Operator),
+                                                 MirI64Type, Other[0], U64Val),
+            MirI64Type);
+        for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+          Result[I] = Other[I];
+        }
+        return Operand(Result, EVMType::UINT256);
+      }
+    }
+
     U256Inst Result = {};
     U256Inst LHS = extractU256Operand(LHSOp);
     U256Inst RHS = extractU256Operand(RHSOp);
@@ -346,6 +495,36 @@ public:
 
   template <BinaryOperator Operator>
   Operand handleShift(Operand ShiftOp, Operand ValueOp) {
+    // Phase 0: Constant folding
+    if (ShiftOp.isConstant() && ValueOp.isConstant()) {
+      intx::uint256 ShiftVal = u256ValueToIntx(ShiftOp.getConstValue());
+      intx::uint256 Value = u256ValueToIntx(ValueOp.getConstValue());
+      intx::uint256 Res;
+      if (ShiftVal >= 256) {
+        if constexpr (Operator == BinaryOperator::BO_SHR_S) {
+          bool SignBit = (ValueOp.getConstValue()[3] >> 63) != 0;
+          Res = SignBit ? ~intx::uint256(0) : intx::uint256(0);
+        } else {
+          Res = intx::uint256(0);
+        }
+      } else {
+        auto Amt = static_cast<unsigned>(ShiftVal);
+        if constexpr (Operator == BinaryOperator::BO_SHL) {
+          Res = Value << Amt;
+        } else if constexpr (Operator == BinaryOperator::BO_SHR_U) {
+          Res = Value >> Amt;
+        } else if constexpr (Operator == BinaryOperator::BO_SHR_S) {
+          bool SignBit = (ValueOp.getConstValue()[3] >> 63) != 0;
+          Res = Value >> Amt;
+          if (SignBit && Amt > 0) {
+            intx::uint256 Mask = ~intx::uint256(0) << (256 - Amt);
+            Res |= Mask;
+          }
+        }
+      }
+      return Operand(intxToU256Value(Res));
+    }
+
     U256Inst Shift = extractU256Operand(ShiftOp);
     U256Inst Value = extractU256Operand(ValueOp);
 
@@ -584,6 +763,38 @@ private:
   U256Inst handleArithmeticRightShift(const U256Inst &Value,
                                       MInstruction *ShiftAmount,
                                       MInstruction *IsLargeShift);
+
+  // U256Value <-> intx::uint256 conversion helpers
+  static intx::uint256 u256ValueToIntx(const U256Value &V) {
+    return (intx::uint256(V[3]) << 192) | (intx::uint256(V[2]) << 128) |
+           (intx::uint256(V[1]) << 64) | intx::uint256(V[0]);
+  }
+  static U256Value intxToU256Value(const intx::uint256 &V) {
+    U256Value R;
+    for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I)
+      R[I] = static_cast<uint64_t>(V >> (I * 64));
+    return R;
+  }
+
+  // u64 fast path helpers
+  Operand handleAddU64Const(const Operand &FullOp, const Operand &U64ConstOp);
+  Operand handleSubU64Const(const Operand &LHSOp, const Operand &U64ConstRHSOp);
+  Operand handleCompareEqU64(const Operand &FullOp, uint64_t U64Val);
+  Operand handleCompareLtRhsU64(const Operand &LHSOp, uint64_t RhsU64);
+  Operand handleCompareGtRhsU64(const Operand &LHSOp, uint64_t RhsU64);
+
+  // Helper functions for inline U256 multiplication
+  MInstruction *createEvmUmul128(MInstruction *LHS, MInstruction *RHS);
+  MInstruction *createEvmUmul128Hi(MInstruction *MulInst);
+
+  // Helper functions for inline U256/U64 division
+  MInstruction *createEvmUdiv128By64(MInstruction *Hi, MInstruction *Lo,
+                                     MInstruction *Divisor);
+  MInstruction *createEvmUrem128By64(MInstruction *DivInst);
+  Operand handleDivU64Divisor(const Operand &DividendOp, uint64_t Divisor);
+  Operand handleModU64Divisor(const Operand &DividendOp, uint64_t Divisor);
+  Operand handleDivU64Dividend(uint64_t Dividend, const Operand &DivisorOp);
+  Operand handleModU64Dividend(uint64_t Dividend, const Operand &DivisorOp);
 
   // ==================== EVM to MIR Opcode Mapping ====================
 

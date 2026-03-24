@@ -34,6 +34,8 @@ public:
     EVM_UMUL128_HI,
     EVM_U256_MUL,
     EVM_U256_MUL_RESULT,
+    EVM_UDIV128_BY64,
+    EVM_UREM128_BY64,
 
     //===---------- Statement Instructions ----------===//
     DASSIGN,

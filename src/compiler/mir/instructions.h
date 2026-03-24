@@ -795,6 +795,52 @@ private:
   uint32_t ResultIdx = 0;
 };
 
+// EVM 128-bit / 64-bit unsigned division: (hi:lo) / divisor -> quotient.
+class EvmUdiv128By64Instruction : public FixedOperandInstruction<3> {
+public:
+  template <typename... Arguments>
+  static EvmUdiv128By64Instruction *create(Arguments &&...Args) {
+    return FixedOperandInstruction::create<EvmUdiv128By64Instruction>(
+        std::forward<Arguments>(Args)...);
+  }
+
+  static bool classof(const MInstruction *Instr) {
+    return Instr->getKind() == EVM_UDIV128_BY64;
+  }
+
+private:
+  friend class FixedOperandInstruction;
+  EvmUdiv128By64Instruction(Opcode Opc, MType *Type, MInstruction *Hi,
+                            MInstruction *Lo, MInstruction *Divisor)
+      : FixedOperandInstruction(MInstruction::EVM_UDIV128_BY64, Opc, 3, Type) {
+    setOperand<0>(Hi);
+    setOperand<1>(Lo);
+    setOperand<2>(Divisor);
+  }
+};
+
+// Extract remainder from EVM udiv128_by64 instruction.
+class EvmUrem128By64Instruction : public FixedOperandInstruction<1> {
+public:
+  template <typename... Arguments>
+  static EvmUrem128By64Instruction *create(Arguments &&...Args) {
+    return FixedOperandInstruction::create<EvmUrem128By64Instruction>(
+        std::forward<Arguments>(Args)...);
+  }
+
+  static bool classof(const MInstruction *Instr) {
+    return Instr->getKind() == EVM_UREM128_BY64;
+  }
+
+private:
+  friend class FixedOperandInstruction;
+  EvmUrem128By64Instruction(MType *Type, MInstruction *DivInst)
+      : FixedOperandInstruction(MInstruction::EVM_UREM128_BY64,
+                                OP_evm_urem128_by64, 1, Type) {
+    setOperand<0>(DivInst);
+  }
+};
+
 } // namespace COMPILER
 
 #endif // COMPILER_IR_INSTRUCTIONS_H

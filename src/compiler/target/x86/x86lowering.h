@@ -75,6 +75,8 @@ public:
   CgRegister lowerEvmUmul128HiExpr(const EvmUmul128HiInstruction &Inst);
   CgRegister lowerEvmU256MulExpr(const EvmU256MulInstruction &Inst);
   CgRegister lowerEvmU256MulResultExpr(const EvmU256MulResultInstruction &Inst);
+  CgRegister lowerEvmUdiv128By64Expr(const EvmUdiv128By64Instruction &Inst);
+  CgRegister lowerEvmUrem128By64Expr(const EvmUrem128By64Instruction &Inst);
   CgRegister lowerAdcExpr(const AdcInstruction &Inst);
   CgRegister lowerSbbExpr(const SbbInstruction &Inst);
 
@@ -133,6 +135,7 @@ private:
   llvm::DenseSet<const MInstruction *> Umul128NeedHi;
   llvm::DenseMap<const MInstruction *, std::array<CgRegister, 3>>
       U256MulResultRegs;
+  llvm::DenseMap<const MInstruction *, CgRegister> Udiv128RemRegs;
 };
 
 } // namespace COMPILER

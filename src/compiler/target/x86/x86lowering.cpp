@@ -1206,6 +1206,62 @@ CgRegister X86CgLowering::lowerEvmU256MulResultExpr(
   return It->second[ResultIdx - 1];
 }
 
+CgRegister
+X86CgLowering::lowerEvmUdiv128By64Expr(const EvmUdiv128By64Instruction &Inst) {
+  const MInstruction *Hi = Inst.getOperand<0>();
+  const MInstruction *Lo = Inst.getOperand<1>();
+  const MInstruction *Divisor = Inst.getOperand<2>();
+
+  CgRegister HiReg = lowerExpr(*Hi);
+  CgRegister LoReg = lowerExpr(*Lo);
+  CgRegister DivReg = lowerExpr(*Divisor);
+
+  SmallVector<CgOperand, 2> CopyToRDX{
+      CgOperand::createRegOperand(X86::RDX, true),
+      CgOperand::createRegOperand(HiReg, false),
+  };
+  MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY), CopyToRDX);
+
+  SmallVector<CgOperand, 2> CopyToRAX{
+      CgOperand::createRegOperand(X86::RAX, true),
+      CgOperand::createRegOperand(LoReg, false),
+  };
+  MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY), CopyToRAX);
+
+  // DIV64r: RDX:RAX / r64 -> quotient in RAX, remainder in RDX
+  SmallVector<CgOperand, 1> DIVOperands{
+      CgOperand::createRegOperand(DivReg, false),
+  };
+  MF->createCgInstruction(*CurBB, TII.get(X86::DIV64r), DIVOperands);
+
+  CgRegister QuotientReg = createReg(&X86::GR64RegClass);
+  CgRegister RemainderReg = createReg(&X86::GR64RegClass);
+
+  SmallVector<CgOperand, 2> CopyQuotient{
+      CgOperand::createRegOperand(QuotientReg, true),
+      CgOperand::createRegOperand(X86::RAX, false),
+  };
+  MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY), CopyQuotient);
+
+  SmallVector<CgOperand, 2> CopyRemainder{
+      CgOperand::createRegOperand(RemainderReg, true),
+      CgOperand::createRegOperand(X86::RDX, false),
+  };
+  MF->createCgInstruction(*CurBB, TII.get(TargetOpcode::COPY), CopyRemainder);
+
+  Udiv128RemRegs[&Inst] = RemainderReg;
+  return QuotientReg;
+}
+
+CgRegister
+X86CgLowering::lowerEvmUrem128By64Expr(const EvmUrem128By64Instruction &Inst) {
+  const MInstruction *DivInst = Inst.getOperand<0>();
+  (void)lowerExpr(*DivInst);
+  auto It = Udiv128RemRegs.find(DivInst);
+  ZEN_ASSERT(It != Udiv128RemRegs.end());
+  return It->second;
+}
+
 CgRegister X86CgLowering::lowerSelectExpr(const SelectInstruction &Inst) {
   const MType &Type = *Inst.getType();
   const MInstruction *Cond = Inst.getOperand<0>();

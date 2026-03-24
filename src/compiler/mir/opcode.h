@@ -29,7 +29,7 @@ enum Opcode : uint16_t {
   OP_CONV_EXPR_END = OP_wasm_fptoui,
 
   OP_OTHER_EXPR_START = OP_dread,
-  OP_OTHER_EXPR_END = OP_evm_umul128_hi,
+  OP_OTHER_EXPR_END = OP_evm_urem128_by64,
 
   OP_CTRL_STMT_START = OP_br,
   OP_CTRL_STMT_END = OP_return,

@@ -217,6 +217,15 @@ void MInstruction::print(llvm::raw_ostream &OS) const {
        << ", idx = " << MulResult->getResultIdx() << ')';
     break;
   }
+  case EVM_UDIV128_BY64: {
+    OS << getOpcodeString(_opcode) << " (" << getOperand<0>() << ", "
+       << getOperand<1>() << ", " << getOperand<2>() << ')';
+    break;
+  }
+  case EVM_UREM128_BY64: {
+    OS << getOpcodeString(_opcode) << " (" << getOperand<0>() << ')';
+    break;
+  }
   case WASM_CHECK: {
     OS << getOpcodeString(_opcode) << " (";
     switch (_opcode) {
