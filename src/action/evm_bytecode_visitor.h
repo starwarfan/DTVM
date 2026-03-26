@@ -35,6 +35,17 @@ public:
 private:
   static constexpr size_t EVM_MAX_STACK_SIZE = 1024;
 
+  struct BlockConstPrecheckPlan {
+    bool Eligible = false;
+    uint64_t MaxRequiredSize = 0;
+    uint64_t CoveredDirectOps = 0;
+  };
+
+  struct AbstractConstU64 {
+    bool Known = false;
+    uint64_t Value = 0;
+  };
+
   void push(const Operand &Opnd) { Stack.push(Opnd); }
 
   Operand pop() {
@@ -278,12 +289,14 @@ private:
         case OP_LOG2:
         case OP_LOG3:
         case OP_LOG4: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           uint8_t NumTopics = Opcode - OP_LOG0;
           handleLog(NumTopics);
           break;
         }
 
         case OP_KECCAK256: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           Operand Offset = pop();
           Operand Length = pop();
           Operand Result = Builder.handleKeccak256(Offset, Length);
@@ -336,6 +349,7 @@ private:
         }
 
         case OP_CALLDATACOPY: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           Operand DestOffset = pop();
           Operand Offset = pop();
           Operand Size = pop();
@@ -350,6 +364,7 @@ private:
         }
 
         case OP_CODECOPY: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           Operand DestOffset = pop();
           Operand Offset = pop();
           Operand Size = pop();
@@ -371,6 +386,7 @@ private:
         }
 
         case OP_EXTCODECOPY: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           Operand Address = pop();
           Operand DestOffset = pop();
           Operand Offset = pop();
@@ -386,6 +402,7 @@ private:
         }
 
         case OP_RETURNDATACOPY: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           Operand DestOffset = pop();
           Operand Offset = pop();
           Operand Size = pop();
@@ -469,6 +486,7 @@ private:
         }
 
         case OP_MLOAD: {
+          Builder.noteMemoryOpcodeInBlock(Opcode, PC);
           Operand Addr = pop();
           Operand Result = Builder.handleMLoad(Addr);
           push(Result);
@@ -476,6 +494,7 @@ private:
         }
 
         case OP_MSTORE: {
+          Builder.noteMemoryOpcodeInBlock(Opcode, PC);
           Operand Addr = pop();
           Operand Value = pop();
           Builder.handleMStore(Addr, Value);
@@ -483,6 +502,7 @@ private:
         }
 
         case OP_MSTORE8: {
+          Builder.noteMemoryOpcodeInBlock(Opcode, PC);
           Operand Addr = pop();
           Operand Value = pop();
           Builder.handleMStore8(Addr, Value);
@@ -504,6 +524,7 @@ private:
         }
 
         case OP_MSIZE: {
+          Builder.noteMemoryOpcodeInBlock(Opcode, PC);
           Operand Result = Builder.handleMSize();
           push(Result);
           break;
@@ -524,6 +545,7 @@ private:
         }
 
         case OP_MCOPY: {
+          Builder.noteMemoryOpcodeInBlock(Opcode, PC);
           Operand DestAddr = pop();
           Operand SrcAddr = pop();
           Operand Length = pop();
@@ -532,31 +554,37 @@ private:
         }
 
         case OP_CREATE: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           handleCreate();
           break;
         }
 
         case OP_CALL: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           handleCallImpl(&IRBuilder::handleCall);
           break;
         }
 
         case OP_CALLCODE: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           handleCallImpl(&IRBuilder::handleCallCode);
           break;
         }
 
         case OP_DELEGATECALL: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           handleCallImplWithoutValue(&IRBuilder::handleDelegateCall);
           break;
         }
 
         case OP_CREATE2: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           handleCreate2();
           break;
         }
 
         case OP_STATICCALL: {
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           handleCallImplWithoutValue(&IRBuilder::handleStaticCall);
           break;
         }
@@ -662,6 +690,15 @@ private:
   void handleBeginBlock(EVMAnalyzer &Analyzer) {
     const auto &BlockInfos = Analyzer.getBlockInfos();
     ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
+    Builder.beginMemoryCompileBlock(PC);
+    const Byte *Bytecode = Ctx->getBytecode();
+    size_t BytecodeSize = Ctx->getBytecodeSize();
+    BlockConstPrecheckPlan PrecheckPlan =
+        analyzeConstDirectMemoryBlockPrecheck(Bytecode, BytecodeSize, PC);
+    if (PrecheckPlan.Eligible) {
+      Builder.setMemoryCompileBlockConstPrecheckPlan(
+          PrecheckPlan.MaxRequiredSize, PrecheckPlan.CoveredDirectOps);
+    }
     const auto &BlockInfo = BlockInfos.at(PC);
     if (BlockInfo.HasUndefinedInstr) {
       Builder.handleUndefined();
@@ -694,6 +731,7 @@ private:
   }
 
   void handleEndBlock() {
+    Builder.endMemoryCompileBlock();
     // Save unused stack elements to runtime
     EvalStack ReverseStack;
     while (!Stack.empty()) {
@@ -708,6 +746,301 @@ private:
   }
 
   void handleStop() { Builder.handleStop(); }
+
+  static bool isHelperSensitiveOpcode(evmc_opcode Opcode) {
+    switch (Opcode) {
+    case OP_LOG0:
+    case OP_LOG1:
+    case OP_LOG2:
+    case OP_LOG3:
+    case OP_LOG4:
+    case OP_KECCAK256:
+    case OP_CALLDATACOPY:
+    case OP_CODECOPY:
+    case OP_EXTCODECOPY:
+    case OP_RETURNDATACOPY:
+    case OP_CREATE:
+    case OP_CALL:
+    case OP_CALLCODE:
+    case OP_DELEGATECALL:
+    case OP_CREATE2:
+    case OP_STATICCALL:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  static bool isBlockTerminatorOpcode(evmc_opcode Opcode) {
+    return Opcode == OP_JUMP || Opcode == OP_JUMPI || Opcode == OP_RETURN ||
+           Opcode == OP_STOP || Opcode == OP_INVALID || Opcode == OP_REVERT ||
+           Opcode == OP_SELFDESTRUCT;
+  }
+
+  static AbstractConstU64 makeUnknownConstU64() { return {}; }
+
+  static AbstractConstU64 makeKnownConstU64(uint64_t Value) {
+    return AbstractConstU64{true, Value};
+  }
+
+  static bool addConstU64(uint64_t LHS, uint64_t RHS, uint64_t &Result) {
+    if (UINT64_MAX - LHS < RHS) {
+      return false;
+    }
+    Result = LHS + RHS;
+    return true;
+  }
+
+  static bool parsePushConstU64(const Byte *Bytecode, size_t BytecodeSize,
+                                uint64_t ImmediatePC, uint8_t NumBytes,
+                                uint64_t &Value) {
+    Value = 0;
+    if (NumBytes > 8) {
+      return false;
+    }
+    if (ImmediatePC + NumBytes > BytecodeSize) {
+      return false;
+    }
+    for (uint8_t I = 0; I < NumBytes; ++I) {
+      Value = (Value << 8) | static_cast<uint64_t>(std::to_integer<uint8_t>(
+                                 Bytecode[ImmediatePC + I]));
+    }
+    return true;
+  }
+
+  BlockConstPrecheckPlan
+  analyzeConstDirectMemoryBlockPrecheck(const Byte *Bytecode,
+                                        size_t BytecodeSize, uint64_t EntryPC) {
+    BlockConstPrecheckPlan Plan;
+    std::vector<AbstractConstU64> SimStack;
+    bool SawDirectMemory = false;
+
+    for (uint64_t ScanPC = EntryPC; ScanPC < BytecodeSize; ++ScanPC) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+      if (ScanPC != EntryPC && Opcode == OP_JUMPDEST) {
+        break;
+      }
+      if (isHelperSensitiveOpcode(Opcode)) {
+        return {};
+      }
+
+      switch (Opcode) {
+      case OP_JUMPDEST:
+        break;
+      case OP_PUSH0: {
+        SimStack.push_back(makeKnownConstU64(0));
+        break;
+      }
+      case OP_PUSH1:
+      case OP_PUSH2:
+      case OP_PUSH3:
+      case OP_PUSH4:
+      case OP_PUSH5:
+      case OP_PUSH6:
+      case OP_PUSH7:
+      case OP_PUSH8: {
+        uint8_t NumBytes =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+        uint64_t Value = 0;
+        if (!parsePushConstU64(Bytecode, BytecodeSize, ScanPC + 1, NumBytes,
+                               Value)) {
+          return {};
+        }
+        SimStack.push_back(makeKnownConstU64(Value));
+        ScanPC += NumBytes;
+        break;
+      }
+      case OP_PUSH9:
+      case OP_PUSH10:
+      case OP_PUSH11:
+      case OP_PUSH12:
+      case OP_PUSH13:
+      case OP_PUSH14:
+      case OP_PUSH15:
+      case OP_PUSH16:
+      case OP_PUSH17:
+      case OP_PUSH18:
+      case OP_PUSH19:
+      case OP_PUSH20:
+      case OP_PUSH21:
+      case OP_PUSH22:
+      case OP_PUSH23:
+      case OP_PUSH24:
+      case OP_PUSH25:
+      case OP_PUSH26:
+      case OP_PUSH27:
+      case OP_PUSH28:
+      case OP_PUSH29:
+      case OP_PUSH30:
+      case OP_PUSH31:
+      case OP_PUSH32: {
+        uint8_t NumBytes =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+        if (NumBytes > BytecodeSize - ScanPC) {
+          return {};
+        }
+        ScanPC += NumBytes;
+        SimStack.push_back(makeUnknownConstU64());
+        break;
+      }
+      case OP_DUP1:
+      case OP_DUP2:
+      case OP_DUP3:
+      case OP_DUP4:
+      case OP_DUP5:
+      case OP_DUP6:
+      case OP_DUP7:
+      case OP_DUP8:
+      case OP_DUP9:
+      case OP_DUP10:
+      case OP_DUP11:
+      case OP_DUP12:
+      case OP_DUP13:
+      case OP_DUP14:
+      case OP_DUP15:
+      case OP_DUP16: {
+        uint8_t Index =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_DUP1) + 1;
+        if (SimStack.size() < Index) {
+          return {};
+        }
+        SimStack.push_back(SimStack[SimStack.size() - Index]);
+        break;
+      }
+      case OP_SWAP1:
+      case OP_SWAP2:
+      case OP_SWAP3:
+      case OP_SWAP4:
+      case OP_SWAP5:
+      case OP_SWAP6:
+      case OP_SWAP7:
+      case OP_SWAP8:
+      case OP_SWAP9:
+      case OP_SWAP10:
+      case OP_SWAP11:
+      case OP_SWAP12:
+      case OP_SWAP13:
+      case OP_SWAP14:
+      case OP_SWAP15:
+      case OP_SWAP16: {
+        uint8_t Index =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_SWAP1) + 1;
+        if (SimStack.size() <= Index) {
+          return {};
+        }
+        std::swap(SimStack.back(), SimStack[SimStack.size() - Index - 1]);
+        break;
+      }
+      case OP_POP: {
+        if (SimStack.empty()) {
+          return {};
+        }
+        SimStack.pop_back();
+        break;
+      }
+      case OP_ADD: {
+        if (SimStack.size() < 2) {
+          return {};
+        }
+        AbstractConstU64 LHS = SimStack.back();
+        SimStack.pop_back();
+        AbstractConstU64 RHS = SimStack.back();
+        SimStack.pop_back();
+        uint64_t Sum = 0;
+        if (LHS.Known && RHS.Known && addConstU64(LHS.Value, RHS.Value, Sum)) {
+          SimStack.push_back(makeKnownConstU64(Sum));
+        } else {
+          SimStack.push_back(makeUnknownConstU64());
+        }
+        break;
+      }
+      case OP_SUB: {
+        if (SimStack.size() < 2) {
+          return {};
+        }
+        AbstractConstU64 LHS = SimStack.back();
+        SimStack.pop_back();
+        AbstractConstU64 RHS = SimStack.back();
+        SimStack.pop_back();
+        if (LHS.Known && RHS.Known && LHS.Value >= RHS.Value) {
+          SimStack.push_back(makeKnownConstU64(LHS.Value - RHS.Value));
+        } else {
+          SimStack.push_back(makeUnknownConstU64());
+        }
+        break;
+      }
+      case OP_MLOAD: {
+        if (SimStack.empty()) {
+          return {};
+        }
+        AbstractConstU64 Addr = SimStack.back();
+        SimStack.pop_back();
+        if (!Addr.Known) {
+          return {};
+        }
+        uint64_t RequiredSize = 0;
+        if (!addConstU64(Addr.Value, 32, RequiredSize)) {
+          return {};
+        }
+        Plan.MaxRequiredSize = std::max(Plan.MaxRequiredSize, RequiredSize);
+        Plan.CoveredDirectOps++;
+        SawDirectMemory = true;
+        SimStack.push_back(makeUnknownConstU64());
+        break;
+      }
+      case OP_MSTORE: {
+        if (SimStack.size() < 2) {
+          return {};
+        }
+        AbstractConstU64 Addr = SimStack.back();
+        SimStack.pop_back();
+        SimStack.pop_back();
+        if (!Addr.Known) {
+          return {};
+        }
+        uint64_t RequiredSize = 0;
+        if (!addConstU64(Addr.Value, 32, RequiredSize)) {
+          return {};
+        }
+        Plan.MaxRequiredSize = std::max(Plan.MaxRequiredSize, RequiredSize);
+        Plan.CoveredDirectOps++;
+        SawDirectMemory = true;
+        break;
+      }
+      case OP_MSTORE8: {
+        if (SimStack.size() < 2) {
+          return {};
+        }
+        AbstractConstU64 Addr = SimStack.back();
+        SimStack.pop_back();
+        SimStack.pop_back();
+        if (!Addr.Known) {
+          return {};
+        }
+        uint64_t RequiredSize = 0;
+        if (!addConstU64(Addr.Value, 1, RequiredSize)) {
+          return {};
+        }
+        Plan.MaxRequiredSize = std::max(Plan.MaxRequiredSize, RequiredSize);
+        Plan.CoveredDirectOps++;
+        SawDirectMemory = true;
+        break;
+      }
+      case OP_MSIZE:
+        SimStack.push_back(makeUnknownConstU64());
+        break;
+      default:
+        if (isBlockTerminatorOpcode(Opcode)) {
+          ScanPC = BytecodeSize;
+          break;
+        }
+        return {};
+      }
+    }
+
+    Plan.Eligible = SawDirectMemory && Plan.CoveredDirectOps >= 2;
+    return Plan;
+  }
 
   template <BinaryOperator Opr> void handleBinaryArithmetic() {
     Operand LHS = pop();
