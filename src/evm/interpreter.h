@@ -89,15 +89,10 @@ public:
   /// Reset state for reuse across calls. Keeps allocated EVMFrame objects
   /// (and their 32 KB stack arrays) alive so that the next allocTopFrame()
   /// only needs to reset a few scalar fields instead of zero-initializing
-  /// the entire array.
-  void resetForNewCall(runtime::EVMInstance *NewInst) {
-    Inst = NewInst;
-    FrameCount = 0; // logically empty, but frames stay allocated
-    Status = EVMC_SUCCESS;
-    ReturnData.clear(); // keeps vector capacity
-    IsJump = false;
-    ExeResult = evmc::Result{EVMC_SUCCESS, 0, 0};
-  }
+  /// the entire array. Per-frame Memory and CallData are cleared; if either
+  /// buffer's capacity is large, it may be released to cap steady-state RSS
+  /// (see interpreter.cpp).
+  void resetForNewCall(runtime::EVMInstance *NewInst);
 
   EVMFrame *allocTopFrame(evmc_message *Msg);
   void freeBackFrame();

@@ -264,22 +264,54 @@ handleExecutionStatus(zen::evm::EVMFrame *&Frame,
 
 } // namespace
 
+namespace {
+
+/// Beyond this retained capacity, Memory / CallData are shrink_to_fit() after
+/// clear() so reusing EVMFrame objects does not grow RSS without bound.
+constexpr size_t kMaxRetainedFrameBufferBytes = 1024 * 1024;
+
+static void clearFrameTransientBuffers(EVMFrame &Frame) {
+  Frame.Memory.clear();
+  if (Frame.Memory.capacity() > kMaxRetainedFrameBufferBytes)
+    Frame.Memory.shrink_to_fit();
+  Frame.CallData.clear();
+  if (Frame.CallData.capacity() > kMaxRetainedFrameBufferBytes)
+    Frame.CallData.shrink_to_fit();
+}
+
+static void releaseAllFrameBuffersIfLarge(std::vector<EVMFrame> &Frames) {
+  for (EVMFrame &F : Frames)
+    clearFrameTransientBuffers(F);
+}
+
+} // namespace
+
+void InterpreterExecContext::resetForNewCall(runtime::EVMInstance *NewInst) {
+  Inst = NewInst;
+  FrameCount = 0;
+  releaseAllFrameBuffersIfLarge(FrameStack);
+  Status = EVMC_SUCCESS;
+  ReturnData.clear();
+  IsJump = false;
+  ExeResult = evmc::Result{EVMC_SUCCESS, 0, 0};
+}
+
 EVMFrame *InterpreterExecContext::allocTopFrame(evmc_message *Msg) {
-  if (FrameCount < FrameStack.size()) {
-    // Reuse an existing EVMFrame object – avoids zero-initializing the
-    // 32 KB uint256 stack array.  Only reset the fields that matter.
-    EVMFrame &Frame = FrameStack[FrameCount];
-    Frame.Sp = 0;
-    Frame.Pc = 0;
-    Frame.Host = nullptr;
-    Frame.Memory.clear();   // keeps capacity
-    Frame.CallData.clear(); // keeps capacity
-    Frame.MTx = {};
-    Frame.Value = 0;
-  } else {
+  const bool Reuse = (FrameCount < FrameStack.size());
+  if (!Reuse) {
     FrameStack.emplace_back();
   }
   EVMFrame &Frame = FrameStack[FrameCount];
+  if (Reuse) {
+    // Reuse an existing EVMFrame object – avoids zero-initializing the
+    // 32 KB uint256 stack array.  Only reset the fields that matter.
+    Frame.Sp = 0;
+    Frame.Pc = 0;
+    Frame.Host = nullptr;
+    clearFrameTransientBuffers(Frame);
+    Frame.MTx = {};
+    Frame.Value = 0;
+  }
   ++FrameCount;
 
   Frame.Msg = *Msg;
