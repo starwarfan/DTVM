@@ -37,8 +37,8 @@ struct RuntimeConfig {
   bool DisableMultipassMultithread = false;
   // Number of threads for multipass JIT if DisableMultipassMultithread is false
   uint32_t NumMultipassThreads = 8;
-  // Enable multipass lazy mode(on request compile)
-  bool EnableMultipassLazy = false;
+  // Enable multipass lazy mode(background JIT compilation + OSR)
+  bool EnableMultipassLazy = true;
 #endif // ZEN_ENABLE_MULTIPASS_JIT
 
   bool validate() {

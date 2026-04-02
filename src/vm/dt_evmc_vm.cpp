@@ -264,6 +264,17 @@ enum evmc_set_option_result set_option(evmc_vm *VMInstance, const char *Name,
     } else {
       return EVMC_SET_OPTION_INVALID_VALUE;
     }
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+  } else if (std::strcmp(Name, "lazy") == 0) {
+    if (std::strcmp(Value, "true") == 0) {
+      VM->Config.EnableMultipassLazy = true;
+      return EVMC_SET_OPTION_SUCCESS;
+    } else if (std::strcmp(Value, "false") == 0) {
+      VM->Config.EnableMultipassLazy = false;
+      return EVMC_SET_OPTION_SUCCESS;
+    }
+    return EVMC_SET_OPTION_INVALID_VALUE;
+#endif
   }
   return EVMC_SET_OPTION_INVALID_NAME;
 }
@@ -601,6 +612,17 @@ DTVM::DTVM()
       ZEN_LOG_WARN("ignore invalid DTVM_EVM_ENABLE_GAS_METERING=%s", EnableGas);
     }
   }
+
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+  if (const char *Lazy = std::getenv("DTVM_EVM_LAZY_JIT"); Lazy != nullptr) {
+    bool ParsedLazy = false;
+    if (parseBoolEnvValue(Lazy, ParsedLazy)) {
+      Config.EnableMultipassLazy = ParsedLazy;
+    } else {
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_LAZY_JIT=%s", Lazy);
+    }
+  }
+#endif
 }
 } // namespace
 

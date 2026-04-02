@@ -27,6 +27,12 @@ EVMModule::EVMModule(Runtime *RT)
 }
 
 EVMModule::~EVMModule() {
+#ifdef ZEN_ENABLE_JIT
+  if (JITCompileThread.joinable()) {
+    JITCompileThread.join();
+  }
+#endif
+
   if (Name) {
     this->freeSymbol(Name);
     Name = common::WASM_SYMBOL_NULL;
@@ -66,7 +72,18 @@ EVMModuleUniquePtr EVMModule::newEVMModule(Runtime &RT,
   Mod->Host = RT.getEVMHost();
 
   if (RT.getConfig().Mode != common::RunMode::InterpMode) {
-    action::performEVMJITCompile(*Mod);
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+    if (RT.getConfig().EnableMultipassLazy) {
+      // Eagerly init bytecode cache (needed by both interpreter and JIT)
+      (void)Mod->getBytecodeCache();
+      EVMModule *RawMod = Mod.get();
+      RawMod->JITCompileThread =
+          std::thread([RawMod]() { action::performEVMJITCompile(*RawMod); });
+    } else
+#endif
+    {
+      action::performEVMJITCompile(*Mod);
+    }
   }
 
   return Mod;

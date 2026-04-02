@@ -7,7 +7,9 @@
 #include "evm/evm_cache.h"
 #include "evmc/evmc.hpp"
 #include "runtime/module.h"
+#include <atomic>
 #include <limits>
+#include <thread>
 
 #ifdef ZEN_ENABLE_JIT
 namespace COMPILER {
@@ -47,13 +49,13 @@ public:
 #ifdef ZEN_ENABLE_JIT
   common::CodeMemPool &getJITCodeMemPool() { return JITCodeMemPool; }
 
-  void *getJITCode() const { return JITCode; }
+  void *getJITCode() const { return JITCode.load(std::memory_order_acquire); }
 
   size_t getJITCodeSize() const { return JITCodeSize; }
 
   void setJITCodeAndSize(void *Code, size_t Size) {
-    JITCode = Code;
     JITCodeSize = Size;
+    JITCode.store(Code, std::memory_order_release);
   }
 #endif // ZEN_ENABLE_JIT
 
@@ -72,8 +74,9 @@ private:
 
 #ifdef ZEN_ENABLE_JIT
   common::CodeMemPool JITCodeMemPool;
-  void *JITCode = nullptr;
+  std::atomic<void *> JITCode{nullptr};
   size_t JITCodeSize = 0;
+  std::thread JITCompileThread;
 #endif // ZEN_ENABLE_JIT
 };
 

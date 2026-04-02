@@ -88,6 +88,11 @@ public:
   // ==================== Stack Methods ====================
   const uint8_t *getEVMStack() const { return EVMStack; }
   uint64_t getEVMStackSize() const { return EVMStackSize; }
+  void setEVMStackSize(uint64_t Size) { EVMStackSize = Size; }
+
+  // OSR (On-Stack Replacement) support
+  uint64_t getOSRPC() const { return OSRPC; }
+  void setOSRPC(uint64_t PC) { OSRPC = PC; }
 
   // ==================== Evmc Message Stack Methods ====================
   // Note: These methods manage the call stack for JIT host interface functions
@@ -294,6 +299,13 @@ public:
     return static_cast<int32_t>(offsetof(EVMInstance, MemorySize));
   }
 
+  static constexpr int32_t getOSRPCOffset() {
+    static_assert(offsetof(EVMInstance, OSRPC) <=
+                      std::numeric_limits<int32_t>::max(),
+                  "EVMInstance offsets should fit in 32-bit signed range");
+    return static_cast<int32_t>(offsetof(EVMInstance, OSRPC));
+  }
+
   // Capacity for EVMStack: 1024 * 256 / 8 = 32768
   static const size_t EVMStackCapacity = 32768;
 
@@ -394,6 +406,10 @@ private:
   // Runtime stack data for EVM.
   uint8_t EVMStack[EVMStackCapacity];
   uint64_t EVMStackSize = 0;
+
+  // OSR (On-Stack Replacement): when non-zero, JIT function enters at this PC
+  // instead of PC=0. Set by interpreter before promoting to JIT.
+  uint64_t OSRPC = 0;
 
   static constexpr size_t ALIGNMENT = 8;
   alignas(16) std::array<uint8_t, HostArgScratchSize> HostArgScratch{};

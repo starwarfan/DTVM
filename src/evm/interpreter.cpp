@@ -1957,6 +1957,14 @@ void BaseInterpreter::interpret() {
         break;
       }
 
+#ifdef ZEN_ENABLE_JIT
+      // OSR: if JIT code is ready, promote to JIT at this jump target
+      if (Context.getInstance()->getModule()->getJITCode()) {
+        Context.saveStateToInstance(Dest);
+        Context.OSRPromoted = true;
+        return;
+      }
+#endif
       Frame->Pc = Dest;
       continue;
     }
@@ -1987,6 +1995,14 @@ void BaseInterpreter::interpret() {
         break;
       }
 
+#ifdef ZEN_ENABLE_JIT
+      // OSR: if JIT code is ready, promote to JIT at this jump target
+      if (Context.getInstance()->getModule()->getJITCode()) {
+        Context.saveStateToInstance(Dest);
+        Context.OSRPromoted = true;
+        return;
+      }
+#endif
       Frame->Pc = Dest;
       continue;
     }
@@ -2229,4 +2245,32 @@ void InterpreterExecContext::restoreStateFromInstance(uint64_t StartPC) {
 
   // Reset execution status
   setStatus(EVMC_SUCCESS);
+}
+
+void InterpreterExecContext::saveStateToInstance(uint64_t TargetPC) {
+  runtime::EVMInstance *Instance = getInstance();
+  EVMFrame *Frame = getCurFrame();
+
+  // Save stack: copy EVMFrame.Stack → EVMInstance.EVMStack
+  constexpr size_t ELEMENT_SIZE = 32;
+  uint8_t *EvmStackData = const_cast<uint8_t *>(Instance->getEVMStack());
+  for (size_t I = 0; I < Frame->Sp; ++I) {
+    uint8_t *ElementData = EvmStackData + (I * ELEMENT_SIZE);
+    const intx::uint256 &Value = Frame->Stack[I];
+    for (size_t J = 0; J < ELEMENT_SIZE / 8; J++) {
+      *reinterpret_cast<uint64_t *>(ElementData) = Value[J];
+      ElementData += 8;
+    }
+  }
+  Instance->setEVMStackSize(Frame->Sp * ELEMENT_SIZE);
+
+  // Save memory: copy EVMFrame.Memory → EVMInstance memory
+  if (!Frame->Memory.empty()) {
+    Instance->expandMemoryNoGas(Frame->Memory.size());
+    std::memcpy(Instance->getMemoryBase(), Frame->Memory.data(),
+                Frame->Memory.size());
+  }
+
+  // Set OSR target PC
+  Instance->setOSRPC(TargetPC);
 }

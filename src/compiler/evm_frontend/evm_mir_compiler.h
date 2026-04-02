@@ -188,6 +188,7 @@ public:
   void loadEVMInstanceAttr();
   void initEVM(CompilerContext *Context);
   void finalizeEVMBase();
+  void finalizeOSR();
 
   void meterOpcode(evmc_opcode Opcode, uint64_t PC);
   void meterOpcodeRange(uint64_t StartPC, uint64_t EndPCExclusive);
@@ -890,6 +891,10 @@ private:
   uint64_t HashMask = 0;
   Variable *JumpTargetVar = nullptr;
   MBasicBlock *IndirectJumpBB = nullptr;
+
+  // OSR (On-Stack Replacement) support
+  Variable *OSRPCVar = nullptr;
+  MBasicBlock *OSRDispatchBB = nullptr;
 
   // Stack check block for stack overflow/underflow checking
   MBasicBlock *StackCheckBB = nullptr;

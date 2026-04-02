@@ -691,8 +691,23 @@ void Runtime::callEVMMainOnPhysStack(EVMInstance &Inst, evmc_message &Msg,
   MsgWithCode.code_size = Inst.getModule()->CodeSize;
   Inst.setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
   Inst.pushMessage(&MsgWithCode);
-  if (getConfig().Mode == RunMode::InterpMode) {
+
+  bool UseInterpreter = (getConfig().Mode == RunMode::InterpMode);
+#ifdef ZEN_ENABLE_JIT
+  if (!UseInterpreter && !Inst.getModule()->getJITCode()) {
+    UseInterpreter = true;
+  }
+#endif
+
+  if (UseInterpreter) {
     callEVMInInterpMode(Inst, MsgWithCode, Result);
+#ifdef ZEN_ENABLE_JIT
+    // OSR: interpreter promoted to JIT mid-execution
+    if (Inst.getOSRPC() != 0) {
+      callEVMInJITMode(Inst, MsgWithCode, Result);
+      Inst.setOSRPC(0);
+    }
+#endif
   } else {
 #ifdef ZEN_ENABLE_JIT
     callEVMInJITMode(Inst, MsgWithCode, Result);
