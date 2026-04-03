@@ -4810,8 +4810,10 @@ void EVMMirBuilder::handleReturnDataCopy(Operand DestOffsetComponents,
 }
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleReturnDataSize() {
-  const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  return callRuntimeFor<uint64_t>(RuntimeFunctions.GetReturnDataSize);
+  MInstruction *ReturnDataSize = getInstanceElement(
+      &Ctx.I64Type, zen::runtime::EVMInstance::getReturnDataSizeOffset());
+  ReturnDataSize = protectUnsafeValue(ReturnDataSize, &Ctx.I64Type);
+  return convertSingleInstrToU256Operand(ReturnDataSize);
 }
 
 bool EVMMirBuilder::hasMemoryCompileStats() const {
