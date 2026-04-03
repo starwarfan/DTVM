@@ -19,29 +19,14 @@
 #include <cstdlib>
 #include <cstring>
 
-#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
-#include "compiler/evm_frontend/evm_analyzer.h"
-#endif
+#ifdef ZEN_ENABLE_VIRTUAL_STACK
+#include "utils/virtual_stack.h"
+#endif // ZEN_ENABLE_VIRTUAL_STACK
 
 namespace {
 
 using namespace zen::runtime;
 using namespace zen::common;
-
-// RAII helper for temporarily changing runtime configuration
-class ScopedConfig {
-public:
-  ScopedConfig(Runtime *Runtime, const RuntimeConfig &NewConfig)
-      : RT(Runtime), PreviousConfig(Runtime->getConfig()) {
-    RT->setConfig(NewConfig);
-  }
-
-  ~ScopedConfig() { RT->setConfig(PreviousConfig); }
-
-private:
-  Runtime *RT;
-  RuntimeConfig PreviousConfig;
-};
 
 // Forward declaration for InstanceGuard
 struct DTVM;
@@ -506,6 +491,93 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   return Result.release_raw();
 }
 
+#ifdef ZEN_ENABLE_JIT
+
+#ifdef ZEN_ENABLE_VIRTUAL_STACK
+/// Virtual stack callback for JIT fast path: invoked with RSP on the virtual
+/// stack. Follows the same pattern as callEVMFuncFromVirtualStack in
+/// runtime.cpp.
+static void callJITFromVirtualStack(zen::utils::VirtualStackInfo *StackInfo) {
+  auto *Inst = static_cast<EVMInstance *>(StackInfo->SavedPtr1);
+  auto *Msg = static_cast<evmc_message *>(StackInfo->SavedPtr2);
+  auto *Result = static_cast<evmc::Result *>(StackInfo->SavedPtr3);
+  Inst->getRuntime()->callEVMInJITMode(*Inst, *Msg, *Result);
+}
+#endif // ZEN_ENABLE_VIRTUAL_STACK
+
+/// Fast path for multipass JIT mode: reuse cached instance, call JIT code
+/// directly. This avoids per-call callEVMMain overhead while delegating
+/// actual JIT execution to Runtime::callEVMInJITMode (single source of truth
+/// for CPU exception handling, error mapping, etc.).
+evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
+                                     evmc_host_context *Context,
+                                     evmc_revision Rev, const evmc_message *Msg,
+                                     const uint8_t *Code, size_t CodeSize) {
+  // RAII guard for host context save/restore (exception safety)
+  HostContextScope HostScope(VM->ExecHost.get(), Host, Context);
+
+  // Ensure runtime and isolation exist
+  if (!ensureRuntimeAndIsolation(VM)) {
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
+  }
+
+  // Module lookup: L1 address-based cache -> Cold load
+  bool IsTransientMod = false;
+  EVMModule *Mod =
+      findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
+  if (!Mod) {
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
+  }
+  ModuleGuard ModGuard(VM, Mod, IsTransientMod);
+
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+  // O(1) flag check replaces per-call O(n) EVMAnalyzer scan.
+  // The flag was set once at module creation in EVMModule::newEVMModule().
+  if (Mod->ShouldFallbackToInterp) {
+    return executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code,
+                                      CodeSize);
+  }
+#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+
+  // Instance reuse (shared only for cacheable top-level calls)
+  EVMInstance *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
+  if (!TheInst) {
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
+  }
+
+  // Setup message with code pointers (same pattern as interpreter fast path)
+  evmc_message MsgWithCode = *Msg;
+  MsgWithCode.code = reinterpret_cast<uint8_t *>(Mod->Code);
+  MsgWithCode.code_size = Mod->CodeSize;
+  TheInst->setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
+  TheInst->pushMessage(&MsgWithCode);
+
+  evmc::Result Result;
+
+#ifdef ZEN_ENABLE_VIRTUAL_STACK
+  if (Msg->depth == 0) {
+    // depth==0: set up virtual stack for stack overflow protection via guard
+    // pages. The virtual stack switches RSP to a separate mmap'd region.
+    zen::utils::VirtualStackInfo StackInfo;
+    StackInfo.SavedPtr1 = TheInst;
+    StackInfo.SavedPtr2 = &MsgWithCode;
+    StackInfo.SavedPtr3 = &Result;
+    TheInst->pushVirtualStack(&StackInfo);
+    StackInfo.runInVirtualStack(&callJITFromVirtualStack);
+    TheInst->popVirtualStack();
+  } else {
+    // depth>0: re-entered via EVMC host callback, already on physical stack
+    VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
+  }
+#else
+  VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
+#endif // ZEN_ENABLE_VIRTUAL_STACK
+
+  Result.gas_left = TheInst->getGas();
+  return Result.release_raw();
+}
+#endif // ZEN_ENABLE_JIT
+
 /// The implementation of the evmc_vm::execute() method.
 evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
                     evmc_host_context *Context, enum evmc_revision Rev,
@@ -519,55 +591,12 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
                                       CodeSize);
   }
 
-  // ---- Multipass / other modes: use callEVMMain for JIT execution ----
-  // RAII guard for host context save/restore (exception safety)
-  HostContextScope HostScope(VM->ExecHost.get(), Host, Context);
-
-  if (!ensureRuntimeAndIsolation(VM)) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
-  }
-
-#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
-  // Use interpreter mode for bytecode that would be too expensive to JIT.
-  // The EVMAnalyzer performs a pattern-aware O(n) scan that detects:
-  //  - raw bytecode size / estimated MIR instruction count too large
-  //  - high density of RA-expensive opcodes (SHL/SHR/SAR/MUL/SIGNEXTEND)
-  //  - long consecutive runs of RA-expensive ops
-  //  - DUP-induced feedback loops (b0 pattern)
-  std::unique_ptr<ScopedConfig> TempConfig;
-  if (VM->Config.Mode == RunMode::MultipassMode) {
-    COMPILER::EVMAnalyzer Analyzer(Rev);
-    Analyzer.analyze(Code, CodeSize);
-    const auto &JITResult = Analyzer.getJITSuitability();
-    if (JITResult.ShouldFallback) {
-      RuntimeConfig NewConfig = VM->Config;
-      NewConfig.Mode = RunMode::InterpMode;
-      TempConfig = std::make_unique<ScopedConfig>(VM->RT.get(), NewConfig);
-    }
-  }
-#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
-
-  // Module lookup: L0 -> L1 -> Cold (shared with interpreter path)
-  bool IsTransientMod = false;
-  EVMModule *Mod =
-      findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
-  if (!Mod) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
-  }
-  ModuleGuard ModGuard(VM, Mod, IsTransientMod);
-
-  // Instance reuse (shared only for cacheable top-level calls)
-  auto *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
-  if (!TheInst) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
-  }
-
-  // Execute via callEVMMain (handles both JIT and interpreter fallback)
-  evmc_message Message = *Msg;
-  evmc::Result Result;
-  VM->RT->callEVMMain(*TheInst, Message, Result);
-
-  return Result.release_raw();
+#ifdef ZEN_ENABLE_JIT
+  // JIT mode: use optimized fast path (bypasses callEVMMain/virtual stack)
+  return executeMultipassFastPath(VM, Host, Context, Rev, Msg, Code, CodeSize);
+#else
+  return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
+#endif // ZEN_ENABLE_JIT
 }
 
 /// @cond internal

@@ -331,6 +331,10 @@ public:
   void callEVMMain(EVMInstance &Inst, evmc_message &Msg, evmc::Result &Result);
   void callEVMMainOnPhysStack(EVMInstance &Inst, evmc_message &Msg,
                               evmc::Result &Result);
+#ifdef ZEN_ENABLE_JIT
+  void callEVMInJITMode(EVMInstance &Inst, evmc_message &Msg,
+                        evmc::Result &Result);
+#endif // ZEN_ENABLE_JIT
   evmc::Host *getEVMHost() const { return EVMHost; }
   void setEVMHost(evmc::Host *Host) { EVMHost = Host; }
 #endif // ZEN_ENABLE_EVM
@@ -365,12 +369,6 @@ private:
   void callWasmFunctionInJITMode(Instance &Inst, uint32_t FuncIdx,
                                  const std::vector<TypedValue> &Args,
                                  std::vector<common::TypedValue> &Results);
-
-#ifdef ZEN_ENABLE_EVM
-  void callEVMInJITMode(EVMInstance &Inst, evmc_message &Msg,
-                        evmc::Result &Result);
-#endif // ZEN_ENABLE_EVM
-
 #endif // ZEN_ENABLE_JIT
 
   common::Mutex Mtx;

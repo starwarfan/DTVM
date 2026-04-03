@@ -19,6 +19,10 @@
 #include "compiler/evm_compiler.h"
 #endif
 
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+#include "compiler/evm_frontend/evm_analyzer.h"
+#endif
+
 namespace zen::runtime {
 
 EVMModule::EVMModule(Runtime *RT)
@@ -66,7 +70,19 @@ EVMModuleUniquePtr EVMModule::newEVMModule(Runtime &RT,
   Mod->Host = RT.getEVMHost();
 
   if (RT.getConfig().Mode != common::RunMode::InterpMode) {
-    action::performEVMJITCompile(*Mod);
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+    // Run the EVMAnalyzer once at module creation to determine if this
+    // contract should fall back to interpreter. This avoids per-call O(n)
+    // bytecode scans in the execute() hot path.
+    COMPILER::EVMAnalyzer Analyzer(Rev);
+    Analyzer.analyze(reinterpret_cast<const uint8_t *>(Mod->Code),
+                     Mod->CodeSize);
+    Mod->ShouldFallbackToInterp = Analyzer.getJITSuitability().ShouldFallback;
+    if (!Mod->ShouldFallbackToInterp)
+#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+    {
+      action::performEVMJITCompile(*Mod);
+    }
   }
 
   return Mod;
