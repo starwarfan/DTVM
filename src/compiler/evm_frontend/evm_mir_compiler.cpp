@@ -3355,22 +3355,33 @@ void EVMMirBuilder::fallbackToInterpreter(uint64_t targetPC) {
 
 typename EVMMirBuilder::Operand
 EVMMirBuilder::handleMLoad(Operand AddrComponents) {
-  normalizeOperandU64(AddrComponents);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemory();
 #endif
   MType *I64Type = &Ctx.I64Type;
 
-  U256Inst AddrParts = extractU256Operand(AddrComponents);
-  MInstruction *Offset = AddrParts[0];
-
-  MInstruction *SizeConst = createIntConstInstruction(I64Type, 32);
-  MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
-      false, OP_add, I64Type, Offset, SizeConst);
-  MInstruction *Overflow = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
-      Offset);
-  if (!tryConsumeConstBlockMemoryPrecheck()) {
+  const bool CanUseLinearU64AddrFastPath =
+      CurBlockLinearPrecheckPlan.Active &&
+      CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining != 0;
+  MInstruction *Offset = nullptr;
+  bool UsedLinearPrecheck = false;
+  if (CanUseLinearU64AddrFastPath) {
+    Offset = extractKnownU64LowOperand(AddrComponents);
+    UsedLinearPrecheck = tryConsumeLinearBlockMemoryPrecheck(Offset, nullptr);
+  }
+  if (!UsedLinearPrecheck) {
+    normalizeOperandU64(AddrComponents);
+    Offset = extractKnownU64LowOperand(AddrComponents);
+  }
+  bool UsedSharedPrecheck =
+      UsedLinearPrecheck || tryConsumeConstBlockMemoryPrecheck();
+  if (!UsedSharedPrecheck) {
+    MInstruction *SizeConst = createIntConstInstruction(I64Type, 32);
+    MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, Offset, SizeConst);
+    MInstruction *Overflow = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
+        Offset);
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     ++MemStats.MLoadExpandCount;
     if (CurBlockMemStats.Active) {
@@ -3380,7 +3391,7 @@ EVMMirBuilder::handleMLoad(Operand AddrComponents) {
     expandMemoryIR(RequiredSize, Overflow);
   }
 
-  MInstruction *MemBase = getMemoryDataPointer();
+  MInstruction *MemBase = getDirectMemoryDataPointer(UsedSharedPrecheck);
   MInstruction *MemAddrInt = createInstruction<BinaryInstruction>(
       false, OP_add, I64Type, MemBase, Offset);
   MInstruction *MemPtr = createInstruction<ConversionInstruction>(
@@ -3400,6 +3411,23 @@ EVMMirBuilder::handleMLoad(Operand AddrComponents) {
   }
   Result = Operand(Parts, EVMType::UINT256);
 
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (UsedLinearPrecheck) {
+    ++MemStats.LinearU64AddrFastPathCount;
+    ++MemStats.LinearU64MLoadFastPathCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.LinearU64AddrFastPathCount;
+      ++CurBlockMemStats.LinearU64MLoadFastPathCount;
+    }
+  }
+  if (UsedSharedPrecheck) {
+    ++MemStats.PrecheckedMLoadOpCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.PrecheckedMLoadOpCount;
+    }
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
@@ -3408,35 +3436,54 @@ EVMMirBuilder::handleMLoad(Operand AddrComponents) {
 
 void EVMMirBuilder::handleMStore(Operand AddrComponents,
                                  Operand ValueComponents) {
-  normalizeOperandU64(AddrComponents);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemory();
 #endif
   MType *I64Type = &Ctx.I64Type;
 
-  U256Inst AddrParts = extractU256Operand(AddrComponents);
-  MInstruction *Offset = AddrParts[0];
-  U256Inst ValueParts = extractU256Operand(ValueComponents);
-
-  MInstruction *SizeConst = createIntConstInstruction(I64Type, 32);
-  MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
-      false, OP_add, I64Type, Offset, SizeConst);
-  // Tie expansion ordering to the stored value to prevent reordering.
-  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
-  MInstruction *ValueDep = createInstruction<BinaryInstruction>(
-      false, OP_or, I64Type, ValueParts[0], ValueParts[1]);
-  ValueDep = createInstruction<BinaryInstruction>(false, OP_or, I64Type,
-                                                  ValueDep, ValueParts[2]);
-  ValueDep = createInstruction<BinaryInstruction>(false, OP_or, I64Type,
-                                                  ValueDep, ValueParts[3]);
-  ValueDep = createInstruction<BinaryInstruction>(false, OP_and, I64Type,
-                                                  ValueDep, Zero);
-  RequiredSize = createInstruction<BinaryInstruction>(false, OP_add, I64Type,
-                                                      RequiredSize, ValueDep);
-  MInstruction *Overflow = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
-      Offset);
-  if (!tryConsumeConstBlockMemoryPrecheck()) {
+  U256Inst ValueParts = {};
+  bool HasValueParts = false;
+  bool CanReuseAddrAsValue =
+      CurBlockLinearPrecheckPlan.Active &&
+      CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining != 0 &&
+      CurBlockLinearPrecheckPlan.ValueEqualsFirstAddr;
+  const bool CanUseLinearU64AddrFastPath =
+      CurBlockLinearPrecheckPlan.Active &&
+      CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining != 0;
+  MInstruction *Offset = nullptr;
+  bool UsedLinearPrecheck = false;
+  if (CanUseLinearU64AddrFastPath) {
+    Offset = extractKnownU64LowOperand(AddrComponents);
+    UsedLinearPrecheck = tryConsumeLinearBlockMemoryPrecheck(Offset, nullptr);
+  }
+  if (!UsedLinearPrecheck) {
+    normalizeOperandU64(AddrComponents);
+    Offset = extractKnownU64LowOperand(AddrComponents);
+  }
+  bool UsedSharedPrecheck =
+      UsedLinearPrecheck || tryConsumeConstBlockMemoryPrecheck();
+  if (!UsedSharedPrecheck) {
+    ValueParts = extractU256Operand(ValueComponents);
+    HasValueParts = true;
+    MInstruction *SizeConst = createIntConstInstruction(I64Type, 32);
+    MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, Offset, SizeConst);
+    // Tie expansion ordering to the stored value to prevent reordering on the
+    // fallback path that still emits a per-op expand sequence.
+    MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+    MInstruction *ValueDep = createInstruction<BinaryInstruction>(
+        false, OP_or, I64Type, ValueParts[0], ValueParts[1]);
+    ValueDep = createInstruction<BinaryInstruction>(false, OP_or, I64Type,
+                                                    ValueDep, ValueParts[2]);
+    ValueDep = createInstruction<BinaryInstruction>(false, OP_or, I64Type,
+                                                    ValueDep, ValueParts[3]);
+    ValueDep = createInstruction<BinaryInstruction>(false, OP_and, I64Type,
+                                                    ValueDep, Zero);
+    RequiredSize = createInstruction<BinaryInstruction>(false, OP_add, I64Type,
+                                                        RequiredSize, ValueDep);
+    MInstruction *Overflow = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
+        Offset);
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     ++MemStats.MStoreExpandCount;
     if (CurBlockMemStats.Active) {
@@ -3446,7 +3493,23 @@ void EVMMirBuilder::handleMStore(Operand AddrComponents,
     expandMemoryIR(RequiredSize, Overflow);
   }
 
-  MInstruction *MemBase = getMemoryDataPointer();
+  if (!HasValueParts && UsedSharedPrecheck && CanReuseAddrAsValue) {
+    MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+    ValueParts = {Offset, Zero, Zero, Zero};
+    HasValueParts = true;
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+    ++MemStats.MStoreAddrValueAliasReuseCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.MStoreAddrValueAliasReuseCount;
+    }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  }
+
+  if (!HasValueParts) {
+    ValueParts = extractU256Operand(ValueComponents);
+  }
+
+  MInstruction *MemBase = getDirectMemoryDataPointer(UsedSharedPrecheck);
   MInstruction *BaseAddrInt = createInstruction<BinaryInstruction>(
       false, OP_add, I64Type, MemBase, Offset);
 
@@ -3468,6 +3531,22 @@ void EVMMirBuilder::handleMStore(Operand AddrComponents,
         false, OP_inttoptr, U64PtrType, Addr);
     createInstruction<StoreInstruction>(true, &Ctx.VoidType, Swapped, Ptr);
   }
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (UsedLinearPrecheck) {
+    ++MemStats.LinearU64AddrFastPathCount;
+    ++MemStats.LinearU64MStoreFastPathCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.LinearU64AddrFastPathCount;
+      ++CurBlockMemStats.LinearU64MStoreFastPathCount;
+    }
+  }
+  if (UsedSharedPrecheck) {
+    ++MemStats.PrecheckedMStoreOpCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.PrecheckedMStoreOpCount;
+    }
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
@@ -3497,7 +3576,8 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
   MInstruction *Overflow = createInstruction<CmpInstruction>(
       false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
       Offset);
-  if (!tryConsumeConstBlockMemoryPrecheck()) {
+  bool UsedSharedPrecheck = tryConsumeConstBlockMemoryPrecheck();
+  if (!UsedSharedPrecheck) {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     ++MemStats.MStore8ExpandCount;
     if (CurBlockMemStats.Active) {
@@ -3507,7 +3587,7 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
     expandMemoryIR(RequiredSize, Overflow);
   }
 
-  MInstruction *MemBase = getMemoryDataPointer();
+  MInstruction *MemBase = getDirectMemoryDataPointer(UsedSharedPrecheck);
   MInstruction *AddrInt = createInstruction<BinaryInstruction>(
       false, OP_add, I64Type, MemBase, Offset);
 
@@ -4458,6 +4538,42 @@ void EVMMirBuilder::normalizeOperandU64NonConst(Operand &Param,
   }
 }
 
+MInstruction *EVMMirBuilder::extractKnownU64LowOperand(const Operand &Opnd) {
+  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+
+  if (Opnd.isEmpty()) {
+    return createIntConstInstruction(I64Type, 0);
+  }
+
+  if (Opnd.isConstant()) {
+    return createIntConstInstruction(I64Type, Opnd.getConstValue()[0]);
+  }
+
+  if (Opnd.getType() == EVMType::UINT64) {
+    return Opnd.getInstr();
+  }
+
+  if (Opnd.isU256MultiComponent()) {
+    U256Inst Instrs = Opnd.getU256Components();
+    if (Instrs[0] != nullptr) {
+      return Instrs[0];
+    }
+
+    U256Var Vars = Opnd.getU256VarComponents();
+    if (Vars[0] != nullptr) {
+      return createInstruction<DreadInstruction>(false, Vars[0]->getType(),
+                                                 Vars[0]->getVarIdx());
+    }
+  }
+
+  if (Opnd.getType() == EVMType::BYTES32) {
+    Operand U256Op = convertBytes32ToU256Operand(Opnd);
+    return extractKnownU64LowOperand(U256Op);
+  }
+
+  return extractU256Operand(Opnd)[0];
+}
+
 void EVMMirBuilder::normalizeOffsetWithSize(Operand &Offset, Operand &Size) {
   normalizeOperandU64(Size);
   if (Offset.getType() == EVMType::BYTES32) {
@@ -4820,6 +4936,7 @@ bool EVMMirBuilder::hasMemoryCompileStats() const {
   return MemStats.MLoadExpandCount != 0 || MemStats.MStoreExpandCount != 0 ||
          MemStats.MStore8ExpandCount != 0 || MemStats.MCopyExpandCount != 0 ||
          MemStats.BlockConstPrecheckCount != 0 ||
+         MemStats.LinearU64AddrFastPathCount != 0 ||
          MemStats.ReloadMemorySizeCount != 0 ||
          MemStats.GetMemoryDataPointerCount != 0 ||
          MemStats.ExpandNeedExpandCFGCount != 0;
@@ -4857,14 +4974,29 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
   ZEN_LOG_DEBUG(
       "[EVM-MEM-SUMMARY] mload_expand=%llu mstore_expand=%llu "
       "mstore8_expand=%llu mcopy_expand=%llu block_const_precheck=%llu "
-      "reload_mem_size=%llu get_mem_ptr=%llu need_expand_cfg=%llu",
+      "block_linear_precheck=%llu prechecked_mload_ops=%llu "
+      "prechecked_mstore_ops=%llu reload_mem_size=%llu get_mem_ptr=%llu "
+      "mem_base_instance_loads=%llu mem_base_cache_uses=%llu "
+      "linear_u64_addr_fast_ops=%llu linear_u64_mload_fast_ops=%llu "
+      "linear_u64_mstore_fast_ops=%llu "
+      "mstore_addr_value_alias_reuse=%llu "
+      "need_expand_cfg=%llu",
       static_cast<unsigned long long>(MemStats.MLoadExpandCount),
       static_cast<unsigned long long>(MemStats.MStoreExpandCount),
       static_cast<unsigned long long>(MemStats.MStore8ExpandCount),
       static_cast<unsigned long long>(MemStats.MCopyExpandCount),
       static_cast<unsigned long long>(MemStats.BlockConstPrecheckCount),
+      static_cast<unsigned long long>(MemStats.BlockLinearPrecheckCount),
+      static_cast<unsigned long long>(MemStats.PrecheckedMLoadOpCount),
+      static_cast<unsigned long long>(MemStats.PrecheckedMStoreOpCount),
       static_cast<unsigned long long>(MemStats.ReloadMemorySizeCount),
       static_cast<unsigned long long>(MemStats.GetMemoryDataPointerCount),
+      static_cast<unsigned long long>(MemStats.MemoryBaseInstanceLoadCount),
+      static_cast<unsigned long long>(MemStats.MemoryBaseCacheUseCount),
+      static_cast<unsigned long long>(MemStats.LinearU64AddrFastPathCount),
+      static_cast<unsigned long long>(MemStats.LinearU64MLoadFastPathCount),
+      static_cast<unsigned long long>(MemStats.LinearU64MStoreFastPathCount),
+      static_cast<unsigned long long>(MemStats.MStoreAddrValueAliasReuseCount),
       static_cast<unsigned long long>(MemStats.ExpandNeedExpandCFGCount));
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
 }
@@ -4872,6 +5004,7 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
 void EVMMirBuilder::beginMemoryCompileBlock(uint64_t EntryPC) {
   CurBlockMemStats = MemoryBlockCompileStats();
   CurBlockConstPrecheckPlan = MemoryBlockConstPrecheckPlan();
+  CurBlockLinearPrecheckPlan = MemoryBlockLinearPrecheckPlan();
   CurBlockMemStats.Active = true;
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
   CurBlockMemStats.BlockSeqId = ++NextMemoryBlockSeqId;
@@ -4891,6 +5024,29 @@ void EVMMirBuilder::setMemoryCompileBlockConstPrecheckPlan(
   CurBlockConstPrecheckPlan.MaxRequiredSize = MaxRequiredSize;
   CurBlockConstPrecheckPlan.CoveredDirectOpsTotal = CoveredDirectOps;
   CurBlockConstPrecheckPlan.CoveredDirectOpsRemaining = CoveredDirectOps;
+}
+
+void EVMMirBuilder::setMemoryCompileBlockLinearPrecheckPlan(
+    uint64_t AccessWidth, uint64_t CoveredDirectOps,
+    bool ValueEqualsFirstAddr) {
+  if (!CurBlockMemStats.Active || CoveredDirectOps < 2) {
+    return;
+  }
+  CurBlockLinearPrecheckPlan = MemoryBlockLinearPrecheckPlan();
+  CurBlockLinearPrecheckPlan.Active = true;
+  CurBlockLinearPrecheckPlan.ValueEqualsFirstAddr = ValueEqualsFirstAddr;
+  CurBlockLinearPrecheckPlan.AccessWidth = AccessWidth;
+  CurBlockLinearPrecheckPlan.CoveredDirectOpsTotal = CoveredDirectOps;
+  CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining = CoveredDirectOps;
+}
+
+void EVMMirBuilder::prepareLinearBlockMemoryPrecheck(Operand StrideComponents) {
+  if (!CurBlockLinearPrecheckPlan.Active ||
+      CurBlockLinearPrecheckPlan.Emitted) {
+    return;
+  }
+  CurBlockLinearPrecheckPlan.PendingStrideComponents = StrideComponents;
+  CurBlockLinearPrecheckPlan.HasPendingStride = true;
 }
 
 void EVMMirBuilder::noteMemoryOpcodeInBlock(evmc_opcode Opcode, uint64_t PC) {
@@ -4977,6 +5133,7 @@ void EVMMirBuilder::endMemoryCompileBlock() {
   if (!hasCurrentMemoryBlockStats()) {
     CurBlockMemStats.Active = false;
     CurBlockConstPrecheckPlan = MemoryBlockConstPrecheckPlan();
+    CurBlockLinearPrecheckPlan = MemoryBlockLinearPrecheckPlan();
     return;
   }
 
@@ -4986,8 +5143,14 @@ void EVMMirBuilder::endMemoryCompileBlock() {
       "mstore8=%llu msize=%llu mcopy=%llu helper_ops=%llu "
       "helper_barrier=%d log=%llu keccak=%llu copy=%llu call=%llu "
       "create=%llu expand_calls=%llu need_expand_cfg=%llu "
-      "get_mem_ptr=%llu reload_mem_size=%llu block_const_precheck=%llu "
-      "prechecked_direct_ops=%llu direct_only_candidate=%d",
+      "get_mem_ptr=%llu mem_base_instance_loads=%llu "
+      "mem_base_cache_uses=%llu reload_mem_size=%llu "
+      "block_const_precheck=%llu block_linear_precheck=%llu "
+      "prechecked_direct_ops=%llu prechecked_mload_ops=%llu "
+      "prechecked_mstore_ops=%llu linear_u64_addr_fast_ops=%llu "
+      "linear_u64_mload_fast_ops=%llu linear_u64_mstore_fast_ops=%llu "
+      "mstore_addr_value_alias_reuse=%llu "
+      "direct_only_candidate=%d",
       static_cast<unsigned long long>(CurBlockMemStats.BlockSeqId),
       static_cast<unsigned long long>(CurBlockMemStats.BlockEntryPC),
       static_cast<unsigned long long>(CurBlockMemStats.FirstMemoryEventPC),
@@ -5008,14 +5171,30 @@ void EVMMirBuilder::endMemoryCompileBlock() {
       static_cast<unsigned long long>(CurBlockMemStats.ExpandCallCount),
       static_cast<unsigned long long>(CurBlockMemStats.NeedExpandCFGCount),
       static_cast<unsigned long long>(CurBlockMemStats.GetMemPtrCount),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryBaseInstanceLoadCount),
+      static_cast<unsigned long long>(CurBlockMemStats.MemoryBaseCacheUseCount),
       static_cast<unsigned long long>(CurBlockMemStats.ReloadMemSizeCount),
       static_cast<unsigned long long>(CurBlockMemStats.BlockConstPrecheckCount),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.BlockLinearPrecheckCount),
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedDirectOpCount),
+      static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMLoadOpCount),
+      static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMStoreOpCount),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.LinearU64AddrFastPathCount),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.LinearU64MLoadFastPathCount),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.LinearU64MStoreFastPathCount),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MStoreAddrValueAliasReuseCount),
       CurBlockMemStats.DirectMemoryOnlyCandidate ? 1 : 0);
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
 
   CurBlockMemStats.Active = false;
   CurBlockConstPrecheckPlan = MemoryBlockConstPrecheckPlan();
+  CurBlockLinearPrecheckPlan = MemoryBlockLinearPrecheckPlan();
 }
 
 bool EVMMirBuilder::tryConsumeConstBlockMemoryPrecheck() {
@@ -5050,13 +5229,132 @@ bool EVMMirBuilder::tryConsumeConstBlockMemoryPrecheck() {
   return true;
 }
 
+bool EVMMirBuilder::tryConsumeLinearBlockMemoryPrecheck(
+    MInstruction *FirstAddr, MInstruction *OrderingDep) {
+  if (!CurBlockLinearPrecheckPlan.Active ||
+      CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining == 0) {
+    return false;
+  }
+
+  if (!CurBlockLinearPrecheckPlan.Emitted) {
+    if (!CurBlockLinearPrecheckPlan.HasPendingStride) {
+      return false;
+    }
+
+    Operand StrideComponents =
+        CurBlockLinearPrecheckPlan.PendingStrideComponents;
+    normalizeOperandU64(StrideComponents);
+
+    MType *I64Type = &Ctx.I64Type;
+    U256Inst StrideParts = extractU256Operand(StrideComponents);
+    MInstruction *Stride = StrideParts[0];
+    MInstruction *LastAddr = FirstAddr;
+    MInstruction *Overflow = createIntConstInstruction(I64Type, 0);
+
+    const uint64_t LastIndex =
+        CurBlockLinearPrecheckPlan.CoveredDirectOpsTotal - 1;
+    if (LastIndex != 0) {
+      MInstruction *LastIndexConst =
+          createIntConstInstruction(I64Type, LastIndex);
+      MInstruction *MaxStride =
+          createIntConstInstruction(I64Type, UINT64_MAX / LastIndex);
+      MInstruction *MulOverflow = createInstruction<CmpInstruction>(
+          false, CmpInstruction::Predicate::ICMP_UGT, I64Type, Stride,
+          MaxStride);
+      MInstruction *StrideDelta = createInstruction<BinaryInstruction>(
+          false, OP_mul, I64Type, Stride, LastIndexConst);
+      LastAddr = createInstruction<BinaryInstruction>(false, OP_add, I64Type,
+                                                      FirstAddr, StrideDelta);
+      MInstruction *AddrOverflow = createInstruction<CmpInstruction>(
+          false, CmpInstruction::Predicate::ICMP_ULT, I64Type, LastAddr,
+          FirstAddr);
+      Overflow = createInstruction<BinaryInstruction>(
+          false, OP_or, I64Type, MulOverflow, AddrOverflow);
+    }
+
+    MInstruction *AccessWidth = createIntConstInstruction(
+        I64Type, CurBlockLinearPrecheckPlan.AccessWidth);
+    MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, LastAddr, AccessWidth);
+    MInstruction *SizeOverflow = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
+        LastAddr);
+    Overflow = createInstruction<BinaryInstruction>(false, OP_or, I64Type,
+                                                    Overflow, SizeOverflow);
+    if (OrderingDep != nullptr) {
+      RequiredSize = createInstruction<BinaryInstruction>(
+          false, OP_add, I64Type, RequiredSize, OrderingDep);
+    }
+
+    expandMemoryIR(RequiredSize, Overflow);
+    CurBlockLinearPrecheckPlan.Emitted = true;
+    CurBlockLinearPrecheckPlan.HasPendingStride = false;
+
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+    ++MemStats.BlockLinearPrecheckCount;
+    if (CurBlockMemStats.Active) {
+      CurBlockMemStats.BlockLinearPrecheckCount++;
+      CurBlockMemStats.PrecheckedDirectOpCount =
+          CurBlockLinearPrecheckPlan.CoveredDirectOpsTotal;
+      CurBlockMemStats.ExpandCallCount++;
+    }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  }
+
+  CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining--;
+  if (CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining == 0) {
+    CurBlockLinearPrecheckPlan.Active = false;
+  }
+  return true;
+}
+
 // ==================== Memory Operation Helper Methods ====================
 
 MInstruction *EVMMirBuilder::getMemoryDataPointer() {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
   ++MemStats.GetMemoryDataPointerCount;
+  ++MemStats.MemoryBaseInstanceLoadCount;
   if (CurBlockMemStats.Active) {
     CurBlockMemStats.GetMemPtrCount++;
+    ++CurBlockMemStats.MemoryBaseInstanceLoadCount;
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  MType *I64Type = &Ctx.I64Type;
+  MPointerType *VoidPtrType = createVoidPtrType();
+  const int32_t MemoryBaseOffset =
+      zen::runtime::EVMInstance::getMemoryBaseOffset();
+  MInstruction *MemPtr = getInstanceElement(VoidPtrType, MemoryBaseOffset);
+  MInstruction *MemBaseInt = createInstruction<ConversionInstruction>(
+      false, OP_ptrtoint, I64Type, MemPtr);
+  if (MemoryBaseVar) {
+    createInstruction<DassignInstruction>(true, &(Ctx.VoidType), MemBaseInt,
+                                          MemoryBaseVar->getVarIdx());
+  }
+  return MemBaseInt;
+}
+
+MInstruction *EVMMirBuilder::getDirectMemoryDataPointer(bool PreferCachedBase) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  ++MemStats.GetMemoryDataPointerCount;
+  if (CurBlockMemStats.Active) {
+    CurBlockMemStats.GetMemPtrCount++;
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+
+  if (PreferCachedBase && MemoryBaseVar) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+    ++MemStats.MemoryBaseCacheUseCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.MemoryBaseCacheUseCount;
+    }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+    return loadVariable(MemoryBaseVar);
+  }
+
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  ++MemStats.MemoryBaseInstanceLoadCount;
+  if (CurBlockMemStats.Active) {
+    ++CurBlockMemStats.MemoryBaseInstanceLoadCount;
   }
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
   MType *I64Type = &Ctx.I64Type;

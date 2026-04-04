@@ -41,6 +41,14 @@ private:
     uint64_t CoveredDirectOps = 0;
   };
 
+  struct BlockLinearPrecheckPlan {
+    bool Eligible = false;
+    evmc_opcode CoveredOpcode = OP_STOP;
+    uint64_t AccessWidth = 0;
+    uint64_t CoveredDirectOps = 0;
+    uint8_t StrideStackIndex = 0;
+  };
+
   struct AbstractConstU64 {
     bool Known = false;
     uint64_t Value = 0;
@@ -487,6 +495,7 @@ private:
 
         case OP_MLOAD: {
           Builder.noteMemoryOpcodeInBlock(Opcode, PC);
+          maybePrepareLinearBlockMemoryPrecheck(Opcode);
           Operand Addr = pop();
           Operand Result = Builder.handleMLoad(Addr);
           push(Result);
@@ -495,6 +504,7 @@ private:
 
         case OP_MSTORE: {
           Builder.noteMemoryOpcodeInBlock(Opcode, PC);
+          maybePrepareLinearBlockMemoryPrecheck(Opcode);
           Operand Addr = pop();
           Operand Value = pop();
           Builder.handleMStore(Addr, Value);
@@ -691,6 +701,7 @@ private:
     const auto &BlockInfos = Analyzer.getBlockInfos();
     ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
     Builder.beginMemoryCompileBlock(PC);
+    CurBlockLinearPrecheckPlan = BlockLinearPrecheckPlan();
     const Byte *Bytecode = Ctx->getBytecode();
     size_t BytecodeSize = Ctx->getBytecodeSize();
     BlockConstPrecheckPlan PrecheckPlan =
@@ -698,6 +709,15 @@ private:
     if (PrecheckPlan.Eligible) {
       Builder.setMemoryCompileBlockConstPrecheckPlan(
           PrecheckPlan.MaxRequiredSize, PrecheckPlan.CoveredDirectOps);
+    } else {
+      CurBlockLinearPrecheckPlan =
+          analyzeLinearDirectMemoryBlockPrecheck(Bytecode, BytecodeSize, PC);
+      if (CurBlockLinearPrecheckPlan.Eligible) {
+        Builder.setMemoryCompileBlockLinearPrecheckPlan(
+            CurBlockLinearPrecheckPlan.AccessWidth,
+            CurBlockLinearPrecheckPlan.CoveredDirectOps,
+            CurBlockLinearPrecheckPlan.CoveredOpcode == OP_MSTORE);
+      }
     }
     const auto &BlockInfo = BlockInfos.at(PC);
     if (BlockInfo.HasUndefinedInstr) {
@@ -732,6 +752,7 @@ private:
 
   void handleEndBlock() {
     Builder.endMemoryCompileBlock();
+    CurBlockLinearPrecheckPlan = BlockLinearPrecheckPlan();
     // Save unused stack elements to runtime
     EvalStack ReverseStack;
     while (!Stack.empty()) {
@@ -806,6 +827,165 @@ private:
                                  Bytecode[ImmediatePC + I]));
     }
     return true;
+  }
+
+  static bool consumeExpectedOpcode(const Byte *Bytecode, size_t BytecodeSize,
+                                    uint64_t &ScanPC,
+                                    evmc_opcode ExpectedOpcode) {
+    if (ScanPC >= BytecodeSize ||
+        static_cast<evmc_opcode>(Bytecode[ScanPC]) != ExpectedOpcode) {
+      return false;
+    }
+    ++ScanPC;
+    return true;
+  }
+
+  static bool consumeZeroPush(const Byte *Bytecode, size_t BytecodeSize,
+                              uint64_t &ScanPC) {
+    if (ScanPC >= BytecodeSize) {
+      return false;
+    }
+
+    evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+    if (Opcode == OP_PUSH0) {
+      ++ScanPC;
+      return true;
+    }
+
+    if (Opcode < OP_PUSH1 || Opcode > OP_PUSH8) {
+      return false;
+    }
+
+    const uint8_t NumBytes =
+        static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+    uint64_t Value = 0;
+    if (!parsePushConstU64(Bytecode, BytecodeSize, ScanPC + 1, NumBytes,
+                           Value) ||
+        Value != 0) {
+      return false;
+    }
+
+    ScanPC += static_cast<uint64_t>(1 + NumBytes);
+    return true;
+  }
+
+  static bool consumeLinearRecurrencePrefix(const Byte *Bytecode,
+                                            size_t BytecodeSize,
+                                            uint64_t EntryPC,
+                                            uint64_t &ScanPC) {
+    ScanPC = EntryPC;
+    if (ScanPC < BytecodeSize &&
+        static_cast<evmc_opcode>(Bytecode[ScanPC]) == OP_JUMPDEST) {
+      ++ScanPC;
+    }
+
+    return consumeZeroPush(Bytecode, BytecodeSize, ScanPC) &&
+           consumeExpectedOpcode(Bytecode, BytecodeSize, ScanPC,
+                                 OP_CALLDATALOAD) &&
+           consumeZeroPush(Bytecode, BytecodeSize, ScanPC);
+  }
+
+  BlockLinearPrecheckPlan analyzeLinearMloadDirectMemoryBlockPrecheck(
+      const Byte *Bytecode, size_t BytecodeSize, uint64_t EntryPC) {
+    uint64_t ScanPC = 0;
+    if (!consumeLinearRecurrencePrefix(Bytecode, BytecodeSize, EntryPC,
+                                       ScanPC)) {
+      return {};
+    }
+
+    uint64_t CoveredDirectOps = 0;
+    while (ScanPC < BytecodeSize) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+      if (Opcode == OP_JUMPDEST || isBlockTerminatorOpcode(Opcode)) {
+        break;
+      }
+
+      uint64_t MotifPC = ScanPC;
+      if (!consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP1) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_MLOAD) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_POP) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP2) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_ADD)) {
+        return {};
+      }
+
+      ++CoveredDirectOps;
+      ScanPC = MotifPC;
+    }
+
+    if (CoveredDirectOps < 2) {
+      return {};
+    }
+
+    BlockLinearPrecheckPlan Plan;
+    Plan.Eligible = true;
+    Plan.CoveredOpcode = OP_MLOAD;
+    Plan.AccessWidth = 32;
+    Plan.CoveredDirectOps = CoveredDirectOps;
+    Plan.StrideStackIndex = 2;
+    return Plan;
+  }
+
+  BlockLinearPrecheckPlan analyzeLinearMstoreDirectMemoryBlockPrecheck(
+      const Byte *Bytecode, size_t BytecodeSize, uint64_t EntryPC) {
+    uint64_t ScanPC = 0;
+    if (!consumeLinearRecurrencePrefix(Bytecode, BytecodeSize, EntryPC,
+                                       ScanPC)) {
+      return {};
+    }
+
+    uint64_t CoveredDirectOps = 0;
+    while (ScanPC < BytecodeSize) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+      if (Opcode == OP_JUMPDEST || isBlockTerminatorOpcode(Opcode)) {
+        break;
+      }
+
+      uint64_t MotifPC = ScanPC;
+      if (!consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP1) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP1) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_MSTORE) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP2) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_ADD)) {
+        return {};
+      }
+
+      ++CoveredDirectOps;
+      ScanPC = MotifPC;
+    }
+
+    if (CoveredDirectOps < 2) {
+      return {};
+    }
+
+    BlockLinearPrecheckPlan Plan;
+    Plan.Eligible = true;
+    Plan.CoveredOpcode = OP_MSTORE;
+    Plan.AccessWidth = 32;
+    Plan.CoveredDirectOps = CoveredDirectOps;
+    Plan.StrideStackIndex = 3;
+    return Plan;
+  }
+
+  BlockLinearPrecheckPlan analyzeLinearDirectMemoryBlockPrecheck(
+      const Byte *Bytecode, size_t BytecodeSize, uint64_t EntryPC) {
+    BlockLinearPrecheckPlan Plan = analyzeLinearMloadDirectMemoryBlockPrecheck(
+        Bytecode, BytecodeSize, EntryPC);
+    if (Plan.Eligible) {
+      return Plan;
+    }
+    return analyzeLinearMstoreDirectMemoryBlockPrecheck(Bytecode, BytecodeSize,
+                                                        EntryPC);
+  }
+
+  void maybePrepareLinearBlockMemoryPrecheck(evmc_opcode Opcode) {
+    if (!CurBlockLinearPrecheckPlan.Eligible ||
+        CurBlockLinearPrecheckPlan.CoveredOpcode != Opcode ||
+        Stack.getSize() <= CurBlockLinearPrecheckPlan.StrideStackIndex) {
+      return;
+    }
+    Builder.prepareLinearBlockMemoryPrecheck(
+        Stack.peek(CurBlockLinearPrecheckPlan.StrideStackIndex));
   }
 
   BlockConstPrecheckPlan
@@ -1313,6 +1493,7 @@ private:
   IRBuilder &Builder;
   CompilerContext *Ctx;
   EvalStack Stack;
+  BlockLinearPrecheckPlan CurBlockLinearPrecheckPlan;
   bool InDeadCode = false;
   uint64_t PC = 0;
 };
