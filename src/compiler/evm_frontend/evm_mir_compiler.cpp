@@ -1374,11 +1374,23 @@ EVMMirBuilder::handleDivU64Dividend(uint64_t Dividend,
   MInstruction *HasUpper = createInstruction<CmpInstruction>(
       false, CmpInstruction::ICMP_NE, &Ctx.I64Type, Upper, Zero);
 
+  // Guard B[0] against zero to prevent hardware divide-by-zero trap.
+  // EVM DIV(a, 0) = 0, but x86 DIV with zero divisor raises SIGFPE.
+  MInstruction *One = createIntConstInstruction(I64Type, 1);
+  MInstruction *IsB0Zero = createInstruction<CmpInstruction>(
+      false, CmpInstruction::ICMP_EQ, &Ctx.I64Type, B[0], Zero);
+  MInstruction *SafeB0 =
+      createInstruction<SelectInstruction>(false, I64Type, IsB0Zero, One, B[0]);
+
   MInstruction *A0 = createIntConstInstruction(I64Type, Dividend);
   MInstruction *Q64 =
-      createInstruction<BinaryInstruction>(false, OP_udiv, I64Type, A0, B[0]);
-  MInstruction *DivResult =
-      createInstruction<SelectInstruction>(false, I64Type, HasUpper, Zero, Q64);
+      createInstruction<BinaryInstruction>(false, OP_udiv, I64Type, A0, SafeB0);
+  // Chain two selects so lowerSelectExpr can fuse each CmpInstruction
+  // condition directly into CMP+CMOVcc, avoiding SETcc+OR+TEST overhead.
+  MInstruction *TmpResult =
+      createInstruction<SelectInstruction>(false, I64Type, IsB0Zero, Zero, Q64);
+  MInstruction *DivResult = createInstruction<SelectInstruction>(
+      false, I64Type, HasUpper, Zero, TmpResult);
 
   U256Inst Result = {DivResult, Zero, Zero, Zero};
   return Operand(Result, EVMType::UINT256);
@@ -1398,11 +1410,23 @@ EVMMirBuilder::handleModU64Dividend(uint64_t Dividend,
   MInstruction *HasUpper = createInstruction<CmpInstruction>(
       false, CmpInstruction::ICMP_NE, &Ctx.I64Type, Upper, Zero);
 
+  // Guard B[0] against zero to prevent hardware divide-by-zero trap.
+  // EVM MOD(a, 0) = 0, but x86 DIV with zero divisor raises SIGFPE.
+  MInstruction *One = createIntConstInstruction(I64Type, 1);
+  MInstruction *IsB0Zero = createInstruction<CmpInstruction>(
+      false, CmpInstruction::ICMP_EQ, &Ctx.I64Type, B[0], Zero);
+  MInstruction *SafeB0 =
+      createInstruction<SelectInstruction>(false, I64Type, IsB0Zero, One, B[0]);
+
   MInstruction *A0 = createIntConstInstruction(I64Type, Dividend);
   MInstruction *R64 =
-      createInstruction<BinaryInstruction>(false, OP_urem, I64Type, A0, B[0]);
-  MInstruction *ModResult =
-      createInstruction<SelectInstruction>(false, I64Type, HasUpper, A0, R64);
+      createInstruction<BinaryInstruction>(false, OP_urem, I64Type, A0, SafeB0);
+  // Chain two selects: IsB0Zero → 0 (div-by-zero), HasUpper → A0 (divisor >
+  // dividend)
+  MInstruction *TmpResult =
+      createInstruction<SelectInstruction>(false, I64Type, IsB0Zero, Zero, R64);
+  MInstruction *ModResult = createInstruction<SelectInstruction>(
+      false, I64Type, HasUpper, A0, TmpResult);
 
   U256Inst Result = {ModResult, Zero, Zero, Zero};
   return Operand(Result, EVMType::UINT256);
