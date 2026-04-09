@@ -404,7 +404,7 @@ EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev,
     }
   } else {
     // Cache hit: same module, just reset with new revision
-    TheInst->resetForNewCall(Rev);
+    TheInst->resetForNewCall(Rev, *Mod);
   }
 
   return TheInst;
