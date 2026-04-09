@@ -8,6 +8,7 @@
 #include "evmc/evmc.hpp"
 #include "runtime/module.h"
 #include <limits>
+#include <memory>
 
 #ifdef ZEN_ENABLE_JIT
 namespace COMPILER {
@@ -52,7 +53,12 @@ public:
 #endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 
 #ifdef ZEN_ENABLE_JIT
-  common::CodeMemPool &getJITCodeMemPool() { return JITCodeMemPool; }
+  common::CodeMemPool &getJITCodeMemPool() {
+    if (!JITCodeMemPool) {
+      JITCodeMemPool = std::make_unique<common::CodeMemPool>();
+    }
+    return *JITCodeMemPool;
+  }
 
   void *getJITCode() const { return JITCode; }
 
@@ -81,7 +87,7 @@ private:
 #endif
 
 #ifdef ZEN_ENABLE_JIT
-  common::CodeMemPool JITCodeMemPool;
+  std::unique_ptr<common::CodeMemPool> JITCodeMemPool;
   void *JITCode = nullptr;
   size_t JITCodeSize = 0;
 #endif // ZEN_ENABLE_JIT
