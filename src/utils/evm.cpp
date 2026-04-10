@@ -269,6 +269,10 @@ bool saveState(const evmc::MockedHost &Host, const std::string &FilePath) {
   File << "    \"block_base_fee\": ";
   writeJsonString(File, toHex(Host.tx_context.block_base_fee.bytes,
                               sizeof(Host.tx_context.block_base_fee.bytes)));
+  File << ",\n";
+  File << "    \"tx_origin\": ";
+  writeJsonString(File, toHex(Host.tx_context.tx_origin.bytes,
+                              sizeof(Host.tx_context.tx_origin.bytes)));
   File << "\n";
   File << "  }\n";
 
@@ -417,6 +421,11 @@ bool loadState(evmc::MockedHost &Host, const std::string &FilePath) {
         TxContext["block_base_fee"].IsString()) {
       Host.tx_context.block_base_fee =
           zen::utils::parseUint256(TxContext["block_base_fee"].GetString());
+    }
+
+    if (TxContext.HasMember("tx_origin") && TxContext["tx_origin"].IsString()) {
+      Host.tx_context.tx_origin =
+          zen::utils::parseAddress(TxContext["tx_origin"].GetString());
     }
   }
 
