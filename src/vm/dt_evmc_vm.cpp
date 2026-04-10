@@ -421,6 +421,7 @@ EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev,
       if (!InstRet)
         return nullptr;
       TheInst = *InstRet;
+      TheInst->resetForNewCall(Rev);
       VM->CachedMainInst = TheInst;
     }
   } else {
