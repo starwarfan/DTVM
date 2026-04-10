@@ -134,9 +134,9 @@ deriveMemorySpecializationProfile(const evmc_message *Msg) {
 
 /// Validate that the cached module's code matches the provided code.
 /// Strict mode performs full-bytecode comparison for hostile/non-standard hosts
-/// that may reuse the same code address for different bytecode.
-/// Relaxed mode checks head/tail windows (fast path for trusted immutable-code
-/// hosts). EIP-170 caps contract code size at 24 KiB.
+/// that may reuse the same code address for different bytecode (e.g.
+/// SELFDESTRUCT + CREATE2). Relaxed mode checks head/tail windows (fast path
+/// for trusted immutable-code hosts). EIP-170 caps contract code size at 24 KiB.
 bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
                        const EVMModule *Mod, bool StrictValidation) {
   if (CodeSize != Mod->CodeSize)
