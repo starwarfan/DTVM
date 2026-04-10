@@ -97,11 +97,10 @@ struct CodeAddrRevEqual {
 };
 
 /// Validate that the cached module's code matches the provided code.
-/// Note: This relies on the host guaranteeing that deployed code at a given
-/// address is immutable. We only check the head and tail (up to 256 bytes each)
-/// as a defense-in-depth measure against accidental cache corruption.
-/// For fully untrusted environments where hosts might reuse addresses for
-/// different bytecode, a full CRC/hash check should be implemented instead.
+/// Use full-byte comparison to avoid stale-module reuse when an address is
+/// re-created with different bytecode (e.g. SELFDESTRUCT + CREATE2).
+/// Partial head/tail checks can miss middle-of-code differences and lead to
+/// deterministic-but-wrong execution.
 bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
                        const EVMModule *Mod) {
   if (CodeSize != Mod->CodeSize)
@@ -109,16 +108,7 @@ bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
   if (CodeSize == 0)
     return true;
   auto *ModCode = reinterpret_cast<const uint8_t *>(Mod->Code);
-  size_t HeadLen = std::min(CodeSize, static_cast<size_t>(256));
-  if (std::memcmp(Code, ModCode, HeadLen) != 0)
-    return false;
-  if (CodeSize > 256) {
-    size_t TailLen = std::min(CodeSize, static_cast<size_t>(256));
-    size_t TailOffset = CodeSize - TailLen;
-    if (std::memcmp(Code + TailOffset, ModCode + TailOffset, TailLen) != 0)
-      return false;
-  }
-  return true;
+  return std::memcmp(Code, ModCode, CodeSize) == 0;
 }
 
 bool parseBoolEnvValue(const char *Value, bool &ParsedValue) {
