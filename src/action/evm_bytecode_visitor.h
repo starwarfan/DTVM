@@ -5,10 +5,17 @@
 #define ZEN_ACTION_EVM_BYTECODE_VISITOR_H
 
 #include "compiler/evm_frontend/evm_analyzer.h"
+#include "compiler/evm_frontend/evm_lifted_stack_lifter.h"
 #include "compiler/evm_frontend/evm_mir_compiler.h"
 #include "evmc/evmc.h"
 #include "evmc/instructions.h"
 #include "runtime/evm_module.h"
+
+#include <array>
+#include <map>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace COMPILER {
 
@@ -16,12 +23,15 @@ template <typename IRBuilder> class EVMByteCodeVisitor {
   typedef typename IRBuilder::CompilerContext CompilerContext;
   typedef typename IRBuilder::Operand Operand;
   typedef zen::action::VMEvalStack<Operand> EvalStack;
+  using StackLifterType = EVMLiftedStackLifter<IRBuilder>;
+  using MergeMaterializationRequest =
+      typename StackLifterType::MergeMaterializationRequest;
   using Byte = zen::common::Byte;
   using Bytes = zen::common::Bytes;
 
 public:
   EVMByteCodeVisitor(IRBuilder &Builder, CompilerContext *Ctx)
-      : Builder(Builder), Ctx(Ctx) {
+      : Builder(Builder), Ctx(Ctx), StackLifter(Builder) {
     ZEN_ASSERT(Ctx);
   }
 
@@ -34,6 +44,7 @@ public:
 
 private:
   static constexpr size_t EVM_MAX_STACK_SIZE = 1024;
+  static constexpr size_t EVM_MAX_PUSH_IMMEDIATE_SIZE = 32;
 
   struct BlockConstPrecheckPlan {
     bool Eligible = false;
@@ -54,15 +65,75 @@ private:
     uint64_t Value = 0;
   };
 
+  template <typename T, typename = void>
+  struct HasRegisterCurrentBlockPC : std::false_type {};
+  template <typename T>
+  struct HasRegisterCurrentBlockPC<
+      T, std::void_t<decltype(std::declval<T &>().registerCurrentBlockPC(
+             uint64_t{}))>> : std::true_type {};
+
+  template <typename T, typename = void>
+  struct HasSpillTrackedStackPreservingPrefix : std::false_type {};
+  template <typename T>
+  struct HasSpillTrackedStackPreservingPrefix<
+      T, std::void_t<
+             decltype(std::declval<T &>().spillTrackedStackPreservingPrefix(
+                 std::declval<const std::vector<Operand> &>(), uint32_t{}))>>
+      : std::true_type {};
+
+  template <typename T, typename = void>
+  struct HasMaterializeStackMergeOperand : std::false_type {};
+  template <typename T>
+  struct HasMaterializeStackMergeOperand<
+      T,
+      std::void_t<decltype(std::declval<T &>().materializeStackMergeOperand(
+          std::declval<const std::vector<uint64_t> &>(),
+          std::declval<const std::vector<std::pair<uint64_t, Operand>> &>()))>>
+      : std::true_type {};
+
+  void registerCurrentBlockPC(uint64_t BlockPC) {
+    if constexpr (HasRegisterCurrentBlockPC<IRBuilder>::value) {
+      Builder.registerCurrentBlockPC(BlockPC);
+    } else {
+      (void)BlockPC;
+    }
+  }
+
+  void spillTrackedStackPreservingPrefix(const std::vector<Operand> &Values,
+                                         uint32_t PrefixDepth) {
+    if constexpr (HasSpillTrackedStackPreservingPrefix<IRBuilder>::value) {
+      Builder.spillTrackedStackPreservingPrefix(Values, PrefixDepth);
+    } else {
+      (void)PrefixDepth;
+      Builder.spillTrackedStack(Values);
+    }
+  }
+
+  Operand materializeStackMergeOperandCompat(
+      const std::vector<uint64_t> &PredBlockPCs,
+      const std::vector<std::pair<uint64_t, Operand>> &IncomingValues) {
+    if constexpr (HasMaterializeStackMergeOperand<IRBuilder>::value) {
+      return Builder.materializeStackMergeOperand(PredBlockPCs, IncomingValues);
+    } else {
+      (void)PredBlockPCs;
+      Operand Result = Builder.createStackEntryOperand();
+      if (!IncomingValues.empty()) {
+        Builder.assignStackEntryOperand(Result, IncomingValues.back().second);
+      }
+      return Result;
+    }
+  }
+
   void push(const Operand &Opnd) { Stack.push(Opnd); }
 
+  void requireLogicalStackDepth(uint32_t Depth) {
+    ZEN_ASSERT(Stack.getSize() >= Depth &&
+               "Logical EVM stack must be preloaded at block entry");
+  }
+
   Operand pop() {
-    Operand Opnd;
-    if (Stack.empty()) {
-      Opnd = Builder.stackPop();
-    } else {
-      Opnd = Stack.pop();
-    }
+    requireLogicalStackDepth(1);
+    Operand Opnd = Stack.pop();
     Builder.releaseOperand(Opnd);
     return Opnd;
   }
@@ -74,6 +145,7 @@ private:
       size_t BytecodeSize = Ctx->getBytecodeSize();
       EVMAnalyzer Analyzer(Ctx->getRevision());
       Analyzer.analyze(Bytecode, BytecodeSize);
+      initializeLiftedBlocks(Analyzer);
 
       const uint8_t *Ip = Bytecode;
       const bool StartsWithJumpDest =
@@ -611,7 +683,45 @@ private:
         // Control flow operations
         case OP_JUMP: {
           Operand Dest = pop();
-          handleEndBlock();
+          uint64_t SuccPC = 0;
+          bool HasLiftedSucc = tryAssignConstantJumpEntryState(Analyzer, Dest);
+          if (!HasLiftedSucc) {
+            if (CurrentBlockLifted) {
+              const bool HasKnownSucc =
+                  tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC);
+              const bool HasKnownLiftedSucc =
+                  HasKnownSucc && isLiftedBlock(SuccPC);
+              auto OutgoingStack = drainLogicalStack();
+              if (HasKnownLiftedSucc) {
+                assignLiftedEntryState(SuccPC, OutgoingStack);
+              }
+              if (!HasKnownSucc) {
+                assignCompatibleDynamicJumpRegionEntryStates(Analyzer,
+                                                             OutgoingStack);
+              }
+              const bool HasCompatibleDynamicTargets =
+                  !HasKnownSucc &&
+                  !Analyzer
+                       .getCompatibleDynamicJumpTargetBlocksForSourceBlock(
+                           CurrentBlockEntryPC)
+                       .empty();
+              const bool NeedsRuntimeMaterialization =
+                  (HasKnownSucc && !HasKnownLiftedSucc) ||
+                  (!HasKnownSucc && !HasCompatibleDynamicTargets);
+              finalizeBlockExit(std::move(OutgoingStack),
+                                NeedsRuntimeMaterialization);
+            } else {
+              handleEndBlock();
+              if (!tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC)) {
+                assignCompatibleDynamicJumpRegionEntryStatesFromRuntime(
+                    Analyzer);
+              }
+            }
+            if (tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC) &&
+                isLiftedBlock(SuccPC)) {
+              assignLiftedEntryStateFromRuntime(Analyzer, SuccPC);
+            }
+          }
           Builder.handleJump(Dest);
           break;
         }
@@ -619,8 +729,67 @@ private:
         case OP_JUMPI: {
           Operand Dest = pop();
           Operand Cond = pop();
-          handleEndBlock();
+          uint64_t JumpSuccPC = 0;
+          bool HasJumpSucc =
+              tryGetConstantJumpSuccessorPC(Analyzer, Dest, JumpSuccPC);
+          uint64_t FallthroughPC = PC + 1;
+          if (Analyzer.hasCanonicalJumpDest(FallthroughPC)) {
+            FallthroughPC = Analyzer.getCanonicalJumpDestPC(FallthroughPC);
+          }
+          bool CanLiftFallthrough =
+              CurrentBlockLifted && isLiftedBlock(FallthroughPC);
+          bool CanLiftJump =
+              HasJumpSucc && CurrentBlockLifted && isLiftedBlock(JumpSuccPC);
+          bool CanPreassignFallthrough =
+              CurrentBlockLifted && isLiftedBlock(FallthroughPC);
+          bool CanPreassignJump =
+              CurrentBlockLifted && HasJumpSucc && isLiftedBlock(JumpSuccPC);
+          bool CanTransferWithoutMaterialize =
+              CurrentBlockLifted && CanLiftFallthrough && CanLiftJump;
+
+          if (CanTransferWithoutMaterialize) {
+            auto OutgoingStack = drainLogicalStack();
+            assignLiftedEntryState(FallthroughPC, OutgoingStack);
+            assignLiftedEntryState(JumpSuccPC, OutgoingStack);
+            finalizeBlockExit(std::move(OutgoingStack), false);
+          } else {
+            if (CurrentBlockLifted) {
+              auto OutgoingStack = drainLogicalStack();
+              if (CanPreassignFallthrough) {
+                assignLiftedEntryState(FallthroughPC, OutgoingStack);
+              }
+              if (CanPreassignJump) {
+                assignLiftedEntryState(JumpSuccPC, OutgoingStack);
+              }
+              if (!HasJumpSucc) {
+                assignCompatibleDynamicJumpRegionEntryStates(Analyzer,
+                                                             OutgoingStack);
+              }
+              bool NeedsRuntimeMaterialization = !CanPreassignFallthrough;
+              if (!NeedsRuntimeMaterialization) {
+                if (HasJumpSucc) {
+                  NeedsRuntimeMaterialization = !CanPreassignJump;
+                }
+              }
+              finalizeBlockExit(std::move(OutgoingStack),
+                                NeedsRuntimeMaterialization);
+            } else {
+              handleEndBlock();
+              if (isLiftedBlock(FallthroughPC)) {
+                assignLiftedEntryStateFromRuntime(Analyzer, FallthroughPC);
+              }
+              if (HasJumpSucc) {
+                if (isLiftedBlock(JumpSuccPC)) {
+                  assignLiftedEntryStateFromRuntime(Analyzer, JumpSuccPC);
+                }
+              } else {
+                assignCompatibleDynamicJumpRegionEntryStatesFromRuntime(
+                    Analyzer);
+              }
+            }
+          }
           Builder.handleJumpI(Dest, Cond);
+          PC = FallthroughPC;
           handleBeginBlock(Analyzer);
           break;
         }
@@ -629,18 +798,32 @@ private:
           // Consecutive JUMPDEST opcodes share one body BB in multipass.
           // Charge all skipped metering points before jumping to the shared
           // destination at the end of the run.
+          bool HasLiveFallthrough = !InDeadCode;
           uint64_t RunStartPC = PC;
           while (Ip < IpEnd && static_cast<evmc_opcode>(*Ip) == OP_JUMPDEST) {
             Ip++;
             PC++;
           }
-          if (PC > RunStartPC && !InDeadCode) {
+          if (PC > RunStartPC && HasLiveFallthrough) {
             Builder.meterOpcodeRange(RunStartPC, PC);
           }
-          handleEndBlock();
+          if (HasLiveFallthrough && tryAssignFallthroughEntryState(PC)) {
+            // Keep runtime stack materialization elided on lifted fallthrough.
+          } else {
+            if (HasLiveFallthrough && CurrentBlockLifted && isLiftedBlock(PC)) {
+              auto OutgoingStack = drainLogicalStack();
+              assignLiftedEntryState(PC, OutgoingStack);
+              finalizeBlockExit(std::move(OutgoingStack), false);
+            } else {
+              handleEndBlock();
+              if (HasLiveFallthrough && isLiftedBlock(PC)) {
+                assignLiftedEntryStateFromRuntime(Analyzer, PC);
+              }
+            }
+          }
           Builder.handleJumpDest(PC);
-          Builder.meterOpcode(Opcode, PC);
           handleBeginBlock(Analyzer);
+          Builder.meterOpcode(Opcode, PC);
           break;
         }
 
@@ -688,12 +871,211 @@ private:
         PC++; // offset 1 byte for opcode
       }
       if (!InDeadCode) {
+        handleEndBlock();
         handleStop();
       }
     } catch (const common::Error &E) {
       ZEN_UNREACHABLE();
       return false;
     }
+    return true;
+  }
+
+  void initializeLiftedBlocks(const EVMAnalyzer &Analyzer) {
+    StackLifter.initialize(Analyzer);
+  }
+
+  bool isLiftedBlock(uint64_t BlockPC) const {
+    return StackLifter.isLiftedBlock(BlockPC);
+  }
+
+  bool canAssignLiftedEntryStateFromRuntime(const EVMAnalyzer &Analyzer,
+                                            uint64_t PredBlockPC,
+                                            uint64_t SuccBlockPC) const {
+    if (!isLiftedBlock(SuccBlockPC)) {
+      return false;
+    }
+
+    const auto &BlockInfos = Analyzer.getBlockInfos();
+    auto PredIt = BlockInfos.find(PredBlockPC);
+    auto SuccIt = BlockInfos.find(SuccBlockPC);
+    if (PredIt == BlockInfos.end() || SuccIt == BlockInfos.end()) {
+      return false;
+    }
+
+    return PredIt->second.ResolvedExitStackDepth >= 0 &&
+           SuccIt->second.FullEntryStateDepth >= 0 &&
+           PredIt->second.ResolvedExitStackDepth ==
+               SuccIt->second.FullEntryStateDepth;
+  }
+
+  std::vector<Operand> drainLogicalStack() {
+    EvalStack ReverseStack;
+    std::vector<Operand> Values;
+    while (!Stack.empty()) {
+      ReverseStack.push(Stack.pop());
+    }
+    while (!ReverseStack.empty()) {
+      Values.push_back(ReverseStack.pop());
+    }
+    return Values;
+  }
+
+  void restoreLogicalStack(const std::vector<Operand> &Values) {
+    for (const Operand &Opnd : Values) {
+      Stack.push(Opnd);
+    }
+  }
+
+  void finalizeBlockExit(std::vector<Operand> Values, bool Materialize) {
+    Builder.endMemoryCompileBlock();
+    CurBlockLinearPrecheckPlan = BlockLinearPrecheckPlan();
+    if (Materialize) {
+      if (CurrentBlockLifted) {
+        spillTrackedStackPreservingPrefix(Values,
+                                          CurrentBlockHiddenLiveInPrefixDepth);
+      } else {
+        for (const Operand &Opnd : Values) {
+          Builder.stackPush(Opnd);
+        }
+      }
+    }
+    InDeadCode = true;
+    CurrentBlockLifted = false;
+    CurrentBlockHiddenLiveInPrefixDepth = 0;
+  }
+
+  bool tryGetConstantJumpSuccessorPC(const EVMAnalyzer &Analyzer,
+                                     const Operand &Dest,
+                                     uint64_t &SuccPC) const {
+    if (!Dest.isConstant()) {
+      return false;
+    }
+    const auto &ConstValue = Dest.getConstValue();
+    if ((ConstValue[3] | ConstValue[2] | ConstValue[1]) != 0) {
+      return false;
+    }
+    uint64_t RawDest = ConstValue[0];
+    if (!Analyzer.hasCanonicalJumpDest(RawDest)) {
+      return false;
+    }
+    SuccPC = Analyzer.getCanonicalJumpDestPC(RawDest);
+    return true;
+  }
+
+  void assignLiftedEntryState(uint64_t BlockPC,
+                              const std::vector<Operand> &Values) {
+    StackLifter.assignEntryState(CurrentBlockEntryPC, BlockPC, Values);
+  }
+
+  void assignCompatibleDynamicJumpRegionEntryStates(
+      const EVMAnalyzer &Analyzer, const std::vector<Operand> &Values) {
+    for (uint64_t TargetBlockPC :
+         Analyzer.getCompatibleDynamicJumpTargetBlocksForSourceBlock(
+             CurrentBlockEntryPC)) {
+      if (!isLiftedBlock(TargetBlockPC)) {
+        continue;
+      }
+      StackLifter.assignEntryState(CurrentBlockEntryPC, TargetBlockPC, Values);
+    }
+  }
+
+  void assignCompatibleDynamicJumpRegionEntryStatesFromRuntime(
+      const EVMAnalyzer &Analyzer) {
+    for (uint64_t TargetBlockPC :
+         Analyzer.getCompatibleDynamicJumpTargetBlocksForSourceBlock(
+             CurrentBlockEntryPC)) {
+      if (!canAssignLiftedEntryStateFromRuntime(Analyzer, CurrentBlockEntryPC,
+                                                TargetBlockPC)) {
+        continue;
+      }
+      StackLifter.assignEntryState(
+          CurrentBlockEntryPC, TargetBlockPC,
+          loadLiftedEntryStateFromRuntime(Analyzer, TargetBlockPC));
+    }
+  }
+
+  void assignLiftedEntryStateFromRuntime(const EVMAnalyzer &Analyzer,
+                                         uint64_t BlockPC) {
+    if (!canAssignLiftedEntryStateFromRuntime(Analyzer, CurrentBlockEntryPC,
+                                              BlockPC)) {
+      return;
+    }
+    StackLifter.assignEntryState(
+        CurrentBlockEntryPC, BlockPC,
+        loadLiftedEntryStateFromRuntime(Analyzer, BlockPC));
+  }
+
+  bool tryAssignConstantJumpEntryState(const EVMAnalyzer &Analyzer,
+                                       const Operand &Dest) {
+    uint64_t SuccPC = 0;
+    if (!CurrentBlockLifted ||
+        !tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC) ||
+        !isLiftedBlock(SuccPC)) {
+      return false;
+    }
+    auto OutgoingStack = drainLogicalStack();
+    assignLiftedEntryState(SuccPC, OutgoingStack);
+    finalizeBlockExit(std::move(OutgoingStack), false);
+    return true;
+  }
+
+  bool tryAssignFallthroughEntryState(uint64_t SuccPC) {
+    if (!CurrentBlockLifted || !isLiftedBlock(SuccPC)) {
+      return false;
+    }
+    auto OutgoingStack = drainLogicalStack();
+    assignLiftedEntryState(SuccPC, OutgoingStack);
+    finalizeBlockExit(std::move(OutgoingStack), false);
+    return true;
+  }
+
+  std::vector<Operand>
+  loadLiftedEntryStateFromRuntime(const EVMAnalyzer &Analyzer,
+                                  uint64_t BlockPC) {
+    std::vector<Operand> Values;
+    const auto &BlockInfos = Analyzer.getBlockInfos();
+    auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end() || !isLiftedBlock(BlockPC)) {
+      return Values;
+    }
+    const auto &BlockInfo = It->second;
+    ZEN_ASSERT(BlockInfo.ResolvedEntryStackDepth >= 0 &&
+               "Lifted block must have resolved entry depth");
+    ZEN_ASSERT(BlockInfo.FullEntryStateDepth >= 0 &&
+               "Lifted block must have full entry state depth");
+    Values.reserve(static_cast<size_t>(BlockInfo.FullEntryStateDepth));
+    for (int32_t Index = 0; Index < BlockInfo.FullEntryStateDepth; ++Index) {
+      int32_t StackIndex = BlockInfo.ResolvedEntryStackDepth - Index - 1;
+      Values.push_back(Builder.stackGet(StackIndex));
+    }
+    return Values;
+  }
+
+  bool validateLiftedBlockStackBounds(const EVMAnalyzer::BlockInfo &BlockInfo) {
+    ZEN_ASSERT(BlockInfo.ResolvedEntryStackDepth >= 0 &&
+               "Lifted block must have resolved entry depth");
+
+    int64_t EntryDepth =
+        static_cast<int64_t>(BlockInfo.ResolvedEntryStackDepth);
+    int64_t MinDepth =
+        EntryDepth + static_cast<int64_t>(BlockInfo.MinStackHeight);
+    if (MinDepth < 0) {
+      Builder.handleTrap(common::ErrorCode::EVMStackUnderflow);
+      InDeadCode = true;
+      CurrentBlockLifted = false;
+      return false;
+    }
+
+    int64_t MaxDepth =
+        EntryDepth + static_cast<int64_t>(BlockInfo.MaxStackHeight);
+    if (MaxDepth > static_cast<int64_t>(EVM_MAX_STACK_SIZE)) {
+      Builder.handleTrap(common::ErrorCode::EVMStackOverflow);
+      InDeadCode = true;
+      CurrentBlockLifted = false;
+      return false;
+    }
+
     return true;
   }
 
@@ -720,24 +1102,42 @@ private:
       }
     }
     const auto &BlockInfo = BlockInfos.at(PC);
-    if (BlockInfo.HasUndefinedInstr) {
-      Builder.handleUndefined();
-      InDeadCode = true;
+    CurrentBlockEntryPC = PC;
+    CurrentBlockHiddenLiveInPrefixDepth = 0;
+    registerCurrentBlockPC(PC);
+    bool LiftedBlock = isLiftedBlock(PC);
+    if (LiftedBlock && !validateLiftedBlockStackBounds(BlockInfo)) {
       return;
     }
+
     if (static_cast<size_t>(-BlockInfo.MinStackHeight) > EVM_MAX_STACK_SIZE) {
       Builder.handleTrap(common::ErrorCode::EVMStackUnderflow);
       InDeadCode = true;
+      CurrentBlockLifted = false;
       return;
     }
     if (static_cast<size_t>(BlockInfo.MaxStackHeight) > EVM_MAX_STACK_SIZE) {
       Builder.handleTrap(common::ErrorCode::EVMStackOverflow);
       InDeadCode = true;
+      CurrentBlockLifted = false;
       return;
     }
     InDeadCode = false;
-    Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
-                                  1024 - BlockInfo.MaxStackHeight);
+    if (!LiftedBlock) {
+      Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
+                                    1024 - BlockInfo.MaxStackHeight);
+    }
+
+    if (LiftedBlock) {
+      CurrentBlockLifted = true;
+      CurrentBlockHiddenLiveInPrefixDepth =
+          static_cast<uint32_t>(std::max(BlockInfo.HiddenLiveInPrefixDepth, 0));
+      materializeLiftedBlockMergeRequests(PC);
+      restoreLiftedBlockLogicalEntryState(PC);
+      return;
+    }
+
+    CurrentBlockLifted = false;
     int32_t TotalPopSize = -BlockInfo.MinPopHeight;
     EvalStack ReverseStack;
     while (TotalPopSize > 0) {
@@ -750,21 +1150,31 @@ private:
     }
   }
 
-  void handleEndBlock() {
-    Builder.endMemoryCompileBlock();
-    CurBlockLinearPrecheckPlan = BlockLinearPrecheckPlan();
-    // Save unused stack elements to runtime
-    EvalStack ReverseStack;
-    while (!Stack.empty()) {
-      Operand Opnd = Stack.pop();
-      ReverseStack.push(Opnd);
+  void materializeLiftedBlockMergeRequests(uint64_t BlockPC) {
+    for (const MergeMaterializationRequest &Request :
+         StackLifter.getMergeMaterializationRequests(BlockPC)) {
+      std::vector<std::pair<uint64_t, Operand>> IncomingValues;
+      IncomingValues.reserve(Request.IncomingValues.size());
+      for (const auto &IncomingValue : Request.IncomingValues) {
+        IncomingValues.emplace_back(IncomingValue.PredBlockPC,
+                                    IncomingValue.Value);
+      }
+      StackLifter.assignMergeOperand(
+          BlockPC, Request.SlotIndex,
+          materializeStackMergeOperandCompat(Request.ExpectedPredBlockPCs,
+                                             IncomingValues));
     }
-    while (!ReverseStack.empty()) {
-      Operand Opnd = ReverseStack.pop();
-      Builder.stackPush(Opnd);
-    }
-    InDeadCode = true;
   }
+
+  void restoreLiftedBlockLogicalEntryState(uint64_t BlockPC) {
+    std::vector<Operand> LogicalEntryState =
+        StackLifter.getLogicalEntryState(BlockPC);
+    if (!LogicalEntryState.empty()) {
+      restoreLogicalStack(LogicalEntryState);
+    }
+  }
+
+  void handleEndBlock() { finalizeBlockExit(drainLogicalStack(), true); }
 
   void handleStop() { Builder.handleStop(); }
 
@@ -1348,22 +1758,26 @@ private:
     uint64_t Available = (Start < BytecodeSize) ? (BytecodeSize - Start) : 0;
     uint64_t ReadCount = (Count < Available) ? Count : Available;
 
-    Bytes Result = ReadCount > 0
-                       ? Bytes(Bytecode + Start, static_cast<size_t>(ReadCount))
-                       : Bytes();
+    if (Count == 0) {
+      return Bytes();
+    }
+
+    ZEN_ASSERT(Count <= EVM_MAX_PUSH_IMMEDIATE_SIZE);
+    PushImmediateScratch.fill(Byte{0});
+    for (uint64_t I = 0; I < ReadCount; ++I) {
+      PushImmediateScratch[static_cast<size_t>(I)] = Bytecode[Start + I];
+    }
+
     PC += Count;
-    return Result;
+    return Bytes(PushImmediateScratch.data(), Count);
   }
+
+  std::array<Byte, EVM_MAX_PUSH_IMMEDIATE_SIZE> PushImmediateScratch = {};
 
   // DUP1-DUP16: Duplicate Nth stack item
   void handleDup(uint8_t Index) {
-    Operand Result;
-    if (Stack.getSize() < static_cast<uint32_t>(Index)) {
-      int32_t MemIndex = static_cast<int32_t>(Index) - Stack.getSize() - 1;
-      Result = Builder.stackGet(MemIndex);
-    } else {
-      Result = Stack.peek(Index - 1);
-    }
+    requireLogicalStackDepth(Index);
+    Operand Result = Stack.peek(Index - 1);
     push(Result);
   }
 
@@ -1375,20 +1789,8 @@ private:
 
   // SWAP1-SWAP16: Swap top with Nth+1 stack item
   void handleSwap(uint8_t Index) {
-    int32_t MemIndex = static_cast<int32_t>(Index) - Stack.getSize();
-    if (Stack.empty()) {
-      Operand A = Builder.stackGet(0);
-      Operand B = Builder.stackGet(MemIndex);
-      Builder.stackSet(0, B);
-      Builder.stackSet(MemIndex, A);
-    } else if (Stack.getSize() < static_cast<uint32_t>(Index) + 1u) {
-      Operand &A = Stack.peek(0);
-      Operand B = Builder.stackGet(MemIndex);
-      Builder.stackSet(MemIndex, A);
-      A = B;
-    } else {
-      std::swap(Stack.peek(0), Stack.peek(Index));
-    }
+    requireLogicalStackDepth(static_cast<uint32_t>(Index) + 1u);
+    std::swap(Stack.peek(0), Stack.peek(Index));
   }
 
   // ==================== Environment Instruction Handlers ====================
@@ -1494,8 +1896,12 @@ private:
   CompilerContext *Ctx;
   EvalStack Stack;
   BlockLinearPrecheckPlan CurBlockLinearPrecheckPlan;
+  StackLifterType StackLifter;
   bool InDeadCode = false;
   uint64_t PC = 0;
+  uint64_t CurrentBlockEntryPC = 0;
+  bool CurrentBlockLifted = false;
+  uint32_t CurrentBlockHiddenLiveInPrefixDepth = 0;
 };
 
 } // namespace COMPILER

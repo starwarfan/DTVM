@@ -4,12 +4,17 @@
 #ifndef EVM_FRONTEND_EVM_ANALYZER_H
 #define EVM_FRONTEND_EVM_ANALYZER_H
 
-#include "compiler/common/common_defs.h"
+#include "common/defines.h"
 #include "evm/evm.h"
 #include "evmc/evmc.h"
 #include "evmc/instructions.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <map>
+#include <queue>
+#include <utility>
+#include <vector>
 
 namespace COMPILER {
 
@@ -121,41 +126,463 @@ static constexpr size_t MAX_DUP_FEEDBACK_PATTERN = 64;
 
 class EVMAnalyzer {
   using Byte = zen::common::Byte;
-  using Bytes = zen::common::Bytes;
 
 public:
   EVMAnalyzer(evmc_revision Rev = zen::evm::DEFAULT_REVISION) : Revision(Rev) {}
 
   struct BlockInfo {
     uint64_t EntryPC = 0;
+    uint64_t BodyStartPC = 0;
+    uint64_t BodyEndPC = 0;
     int32_t MaxStackHeight = 0;
     int32_t MinStackHeight = 0;
     int32_t MinPopHeight = 0;
     int32_t StackHeightDiff = 0;
+    int32_t EntryStackDepth = 0;
+    int32_t ResolvedEntryStackDepth = -1;
+    int32_t ResolvedExitStackDepth = -1;
+    int32_t FullEntryStateDepth = -1;
+    int32_t HiddenLiveInPrefixDepth = 0;
+    bool HasInconsistentEntryDepth = false;
+    bool IsEntryStateCompatible = false;
+    bool HasHiddenLiveInPrefix = false;
+    bool RequiresEntryMergeState = false;
+    bool HasDeferredEntryMerge = false;
+    bool IsDynamicJumpTargetCandidate = false;
+    bool HasCompatibleDynamicJumpTargetShape = false;
     bool IsJumpDest = false;
     bool HasUndefinedInstr = false;
+    bool HasDynamicJump = false;
+    bool HasConditionalJump = false;
+    bool HasConstantJump = false;
+    bool CanLiftStack = false;
+    uint64_t ConstantJumpTargetPC = 0;
+    uint64_t DynamicJumpTargetRegionEntryPC = 0;
+    std::vector<uint64_t> DynamicJumpTargetRegions;
     uint32_t RAExpensiveCount = 0;
+    std::vector<uint64_t> Successors;
+    std::vector<uint64_t> Predecessors;
 
     BlockInfo() = default;
-    BlockInfo(uint64_t PC) : EntryPC(PC) {}
+    BlockInfo(uint64_t PC, uint64_t StartPC = 0, bool JumpDest = false)
+        : EntryPC(PC), BodyStartPC(StartPC), BodyEndPC(StartPC),
+          IsJumpDest(JumpDest) {}
   };
 
   const std::map<uint64_t, BlockInfo> &getBlockInfos() const {
     return BlockInfos;
   }
 
-  /// Return the JIT suitability result computed during the last analyze() call.
+  struct DynamicJumpRegionInfo {
+    uint64_t RegionEntryPC = 0;
+    std::vector<uint64_t> SourceBlocks;
+    std::vector<uint64_t> TargetBlocks;
+    int32_t UniformEntryDepth = -1;
+    int32_t FullEntryStateDepth = -1;
+    int32_t HiddenLiveInPrefixDepth = 0;
+    bool RequiresEntryMergeState = false;
+    bool HasUniformEntryDepth = false;
+    bool HasCompatibleTargetShape = false;
+    uint32_t ShapeClassId = 0;
+  };
+
+  const std::map<uint64_t, DynamicJumpRegionInfo> &
+  getDynamicJumpRegions() const {
+    return DynamicJumpRegions;
+  }
+
+  const DynamicJumpRegionInfo *
+  getDynamicJumpRegionInfo(uint64_t RegionEntryPC) const {
+    auto It = DynamicJumpRegions.find(RegionEntryPC);
+    if (It == DynamicJumpRegions.end()) {
+      return nullptr;
+    }
+    return &It->second;
+  }
+
+  std::vector<uint32_t>
+  getCompatibleDynamicJumpShapeClassIdsForBlock(uint64_t BlockPC) const {
+    std::vector<uint32_t> ShapeClassIds;
+    auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end()) {
+      return ShapeClassIds;
+    }
+
+    for (uint64_t RegionEntryPC : It->second.DynamicJumpTargetRegions) {
+      const auto *RegionInfo = getDynamicJumpRegionInfo(RegionEntryPC);
+      if (!RegionInfo || !RegionInfo->HasCompatibleTargetShape ||
+          RegionInfo->ShapeClassId == 0) {
+        continue;
+      }
+      if (std::find(ShapeClassIds.begin(), ShapeClassIds.end(),
+                    RegionInfo->ShapeClassId) == ShapeClassIds.end()) {
+        ShapeClassIds.push_back(RegionInfo->ShapeClassId);
+      }
+    }
+    return ShapeClassIds;
+  }
+
+  uint32_t
+  getUniqueCompatibleDynamicJumpShapeClassForBlock(uint64_t BlockPC) const {
+    const std::vector<uint32_t> ShapeClassIds =
+        getCompatibleDynamicJumpShapeClassIdsForBlock(BlockPC);
+    return ShapeClassIds.size() == 1 ? ShapeClassIds.front() : 0;
+  }
+
+  uint32_t
+  getOutgoingCompatibleDynamicJumpShapeClassForBlock(uint64_t BlockPC) const {
+    auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end()) {
+      return 0;
+    }
+    if (!It->second.HasDynamicJump ||
+        It->second.DynamicJumpTargetRegionEntryPC == 0) {
+      return 0;
+    }
+
+    const auto *RegionInfo =
+        getDynamicJumpRegionInfo(It->second.DynamicJumpTargetRegionEntryPC);
+    if (!RegionInfo || !RegionInfo->HasCompatibleTargetShape) {
+      return 0;
+    }
+    return RegionInfo->ShapeClassId;
+  }
+
+  bool blockHasCompatibleDynamicJumpShapeClass(uint64_t BlockPC,
+                                               uint32_t ShapeClassId) const {
+    if (ShapeClassId == 0) {
+      return false;
+    }
+    const std::vector<uint32_t> ShapeClassIds =
+        getCompatibleDynamicJumpShapeClassIdsForBlock(BlockPC);
+    return std::find(ShapeClassIds.begin(), ShapeClassIds.end(),
+                     ShapeClassId) != ShapeClassIds.end();
+  }
+
+  bool blocksShareCompatibleDynamicJumpShapeClass(uint64_t BlockPC,
+                                                  uint64_t OtherBlockPC) const {
+    const std::vector<uint32_t> ShapeClassIds =
+        getCompatibleDynamicJumpShapeClassIdsForBlock(BlockPC);
+    const std::vector<uint32_t> OtherShapeClassIds =
+        getCompatibleDynamicJumpShapeClassIdsForBlock(OtherBlockPC);
+    for (uint32_t ShapeClassId : ShapeClassIds) {
+      if (std::find(OtherShapeClassIds.begin(), OtherShapeClassIds.end(),
+                    ShapeClassId) != OtherShapeClassIds.end()) {
+        return true;
+      }
+    }
+
+    const uint32_t OutgoingShapeClassId =
+        getOutgoingCompatibleDynamicJumpShapeClassForBlock(BlockPC);
+    if (OutgoingShapeClassId != 0 &&
+        (blockHasCompatibleDynamicJumpShapeClass(OtherBlockPC,
+                                                 OutgoingShapeClassId) ||
+         OutgoingShapeClassId ==
+             getOutgoingCompatibleDynamicJumpShapeClassForBlock(
+                 OtherBlockPC))) {
+      return true;
+    }
+
+    const uint32_t OtherOutgoingShapeClassId =
+        getOutgoingCompatibleDynamicJumpShapeClassForBlock(OtherBlockPC);
+    return OtherOutgoingShapeClassId != 0 &&
+           blockHasCompatibleDynamicJumpShapeClass(BlockPC,
+                                                   OtherOutgoingShapeClassId);
+  }
+
+  std::vector<uint64_t>
+  getDynamicJumpSourceBlocksForBlock(uint64_t BlockPC) const {
+    auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end()) {
+      return {};
+    }
+    return collectDynamicJumpSourceBlocksForInfo(It->second);
+  }
+
+  std::vector<uint64_t>
+  getPotentialEntryPredecessorsForBlock(uint64_t BlockPC) const {
+    auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end()) {
+      return {};
+    }
+
+    std::vector<uint64_t> PredBlockPCs(It->second.Predecessors.begin(),
+                                       It->second.Predecessors.end());
+    for (uint64_t PredBlockPC :
+         collectDynamicJumpSourceBlocksForInfo(It->second)) {
+      appendUniqueBlockPC(PredBlockPCs, PredBlockPC);
+    }
+    return PredBlockPCs;
+  }
+
+  std::vector<uint64_t>
+  getCompatibleDynamicJumpTargetBlocksForSourceBlock(uint64_t BlockPC) const {
+    auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end()) {
+      return {};
+    }
+    uint32_t OutgoingShapeClassId =
+        getOutgoingCompatibleDynamicJumpShapeClassForBlock(BlockPC);
+    if (OutgoingShapeClassId == 0 && It->second.HasDynamicJump) {
+      OutgoingShapeClassId =
+          getUniqueCompatibleDynamicJumpShapeClassForBlock(BlockPC);
+    }
+    if (OutgoingShapeClassId != 0) {
+      std::vector<uint64_t> TargetBlockPCs;
+      for (const auto &[EntryPC, Info] : BlockInfos) {
+        if (!Info.HasCompatibleDynamicJumpTargetShape) {
+          continue;
+        }
+        if (blockHasCompatibleDynamicJumpShapeClass(EntryPC,
+                                                    OutgoingShapeClassId)) {
+          appendUniqueBlockPC(TargetBlockPCs, EntryPC);
+        }
+      }
+      return TargetBlockPCs;
+    }
+    if (!It->second.HasDynamicJump ||
+        It->second.DynamicJumpTargetRegionEntryPC == 0) {
+      return {};
+    }
+
+    const auto *RegionInfo =
+        getDynamicJumpRegionInfo(It->second.DynamicJumpTargetRegionEntryPC);
+    if (!RegionInfo || !RegionInfo->HasCompatibleTargetShape) {
+      return {};
+    }
+    return RegionInfo->TargetBlocks;
+  }
+
+  bool hasDeferredLiftedEntryMerge(uint64_t BlockPC) const {
+    auto It = BlockInfos.find(BlockPC);
+    return It != BlockInfos.end() && It->second.CanLiftStack &&
+           It->second.HasDeferredEntryMerge;
+  }
+
+  bool canTransferLiftedEntryStateWithoutRuntimeMaterialization(
+      uint64_t BlockPC) const {
+    auto It = BlockInfos.find(BlockPC);
+    return It != BlockInfos.end() && It->second.CanLiftStack;
+  }
+
+  bool canTransferCompatibleDynamicJumpTargetsWithoutRuntimeMaterialization(
+      uint64_t BlockPC) const {
+    const std::vector<uint64_t> TargetBlockPCs =
+        getCompatibleDynamicJumpTargetBlocksForSourceBlock(BlockPC);
+    return !TargetBlockPCs.empty() &&
+           std::all_of(
+               TargetBlockPCs.begin(), TargetBlockPCs.end(),
+               [this](uint64_t TargetBlockPC) {
+                 return canTransferLiftedEntryStateWithoutRuntimeMaterialization(
+                     TargetBlockPC);
+               });
+  }
+
   const JITSuitabilityResult &getJITSuitability() const { return JITResult; }
 
+  bool hasCanonicalJumpDest(uint64_t PC) const {
+    return JumpDestCanonicalPCs.count(PC) != 0;
+  }
+
+  uint64_t getCanonicalJumpDestPC(uint64_t PC) const {
+    auto It = JumpDestCanonicalPCs.find(PC);
+    return It == JumpDestCanonicalPCs.end() ? PC : It->second;
+  }
+
+  bool hasUnknownDynamicJumpTargets() const { return HasUnknownDynamicJump; }
+
+  bool analyzeSuitabilityOnly(const uint8_t *Bytecode, size_t BytecodeSize) {
+    resetAnalysisState();
+    analyzeSuitability(Bytecode, BytecodeSize);
+    return true;
+  }
+
   bool analyze(const uint8_t *Bytecode, size_t BytecodeSize) {
+    resetAnalysisState();
+    analyzeSuitability(Bytecode, BytecodeSize);
+    buildJumpDestRuns(Bytecode, BytecodeSize);
+    buildBlocks(Bytecode, BytecodeSize);
+    linkPredecessors();
+    resolveEntryDepths();
+    markDynamicJumpTargetCandidates();
+    resolveDynamicJumpTargetEntryDepths();
+    finalizeEntryShapeMetadata();
+    finalizeLiftability();
+    return true;
+  }
+
+private:
+  void resetAnalysisState() {
     BlockInfos.clear();
+    DynamicJumpRegions.clear();
+    JumpDestCanonicalPCs.clear();
+    EntryBlockPC = 0;
+    HasUnknownDynamicJump = false;
+  }
+
+  struct AbstractValue {
+    bool KnownConst = false;
+    bool FitsU64 = false;
+    uint64_t Low = 0;
+
+    static AbstractValue unknown() { return {}; }
+
+    static AbstractValue constFromPush(const uint8_t *Bytecode,
+                                       size_t BytecodeSize, size_t Start,
+                                       size_t Size) {
+      AbstractValue V;
+      V.KnownConst = true;
+      V.FitsU64 = true;
+      V.Low = 0;
+      if (Size == 0) {
+        return V;
+      }
+
+      const size_t Available =
+          Start < BytecodeSize ? (BytecodeSize - Start) : 0;
+      const size_t ReadCount = std::min(Size, Available);
+      auto readPushByte = [&](size_t Index) -> uint8_t {
+        if (Index >= ReadCount) {
+          return 0;
+        }
+        return Bytecode[Start + Index];
+      };
+
+      size_t ValueStart = 0;
+      if (Size > sizeof(uint64_t)) {
+        for (size_t I = 0; I < Size - sizeof(uint64_t); ++I) {
+          if (readPushByte(I) != 0) {
+            V.FitsU64 = false;
+            break;
+          }
+        }
+        ValueStart = Size - sizeof(uint64_t);
+      }
+      for (size_t I = ValueStart; I < Size; ++I) {
+        V.Low = (V.Low << 8) | static_cast<uint64_t>(readPushByte(I));
+      }
+      return V;
+    }
+  };
+
+  static bool isBlockTerminator(evmc_opcode Opcode) {
+    switch (Opcode) {
+    case OP_JUMP:
+    case OP_STOP:
+    case OP_RETURN:
+    case OP_INVALID:
+    case OP_REVERT:
+    case OP_SELFDESTRUCT:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  static size_t immediateSize(evmc_opcode Opcode) {
+    if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+      return static_cast<size_t>(Opcode - OP_PUSH0);
+    }
+    return 0;
+  }
+
+  void analyzeSuitability(const uint8_t *Bytecode, size_t BytecodeSize) {
     JITResult = JITSuitabilityResult();
     JITResult.BytecodeSize = BytecodeSize;
 
-    const uint8_t *Ip = Bytecode;
-    const uint8_t *IpEnd = Bytecode + BytecodeSize;
+    size_t CurConsecutiveExpensive = 0;
+    size_t CurBlockExpensiveCount = 0;
+    bool PrevWasDup = false;
 
-    // Get instruction tables based on revision
+    size_t PCIndex = 0;
+    while (PCIndex < BytecodeSize) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[PCIndex]);
+      uint8_t OpcodeU8 = static_cast<uint8_t>(Opcode);
+
+      JITResult.MirEstimate += MIR_OPCODE_WEIGHT[OpcodeU8];
+
+      if (isRAExpensiveOpcode(OpcodeU8)) {
+        JITResult.RAExpensiveCount++;
+        CurBlockExpensiveCount++;
+        CurConsecutiveExpensive++;
+        if (PrevWasDup) {
+          JITResult.DupFeedbackPatternCount++;
+        }
+        PrevWasDup = false;
+      } else if (isDupOrSwapOpcode(OpcodeU8)) {
+        PrevWasDup = isDupOpcode(OpcodeU8);
+      } else {
+        JITResult.MaxConsecutiveExpensive = std::max(
+            JITResult.MaxConsecutiveExpensive, CurConsecutiveExpensive);
+        CurConsecutiveExpensive = 0;
+        PrevWasDup = false;
+      }
+
+      bool IsBlockBoundary = (Opcode == OP_JUMPI || Opcode == OP_JUMPDEST ||
+                              isBlockTerminator(Opcode));
+      if (IsBlockBoundary) {
+        JITResult.MaxBlockExpensiveCount =
+            std::max(JITResult.MaxBlockExpensiveCount, CurBlockExpensiveCount);
+        CurBlockExpensiveCount = 0;
+        JITResult.MaxConsecutiveExpensive = std::max(
+            JITResult.MaxConsecutiveExpensive, CurConsecutiveExpensive);
+        CurConsecutiveExpensive = 0;
+        PrevWasDup = false;
+      }
+
+      size_t PushBytes = immediateSize(Opcode);
+      PCIndex += 1 + PushBytes;
+    }
+
+    JITResult.MaxConsecutiveExpensive =
+        std::max(JITResult.MaxConsecutiveExpensive, CurConsecutiveExpensive);
+    JITResult.MaxBlockExpensiveCount =
+        std::max(JITResult.MaxBlockExpensiveCount, CurBlockExpensiveCount);
+
+    JITResult.ShouldFallback =
+        BytecodeSize > MAX_JIT_BYTECODE_SIZE ||
+        JITResult.MirEstimate > MAX_JIT_MIR_ESTIMATE ||
+        JITResult.MaxConsecutiveExpensive > MAX_CONSECUTIVE_RA_EXPENSIVE ||
+        JITResult.MaxBlockExpensiveCount > MAX_BLOCK_RA_EXPENSIVE ||
+        JITResult.DupFeedbackPatternCount > MAX_DUP_FEEDBACK_PATTERN;
+  }
+
+  void buildJumpDestRuns(const uint8_t *Bytecode, size_t BytecodeSize) {
+    size_t PCIndex = 0;
+    while (PCIndex < BytecodeSize) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[PCIndex]);
+      if (Opcode == OP_JUMPDEST) {
+        size_t RunStart = PCIndex;
+        size_t RunEnd = PCIndex;
+        while (RunEnd + 1 < BytecodeSize &&
+               static_cast<evmc_opcode>(Bytecode[RunEnd + 1]) == OP_JUMPDEST) {
+          ++RunEnd;
+        }
+        for (size_t PC = RunStart; PC <= RunEnd; ++PC) {
+          JumpDestCanonicalPCs[static_cast<uint64_t>(PC)] =
+              static_cast<uint64_t>(RunEnd);
+        }
+        PCIndex = RunEnd + 1;
+        continue;
+      }
+      PCIndex += 1 + immediateSize(Opcode);
+    }
+  }
+
+  void ensureAbstractDepth(std::vector<AbstractValue> &Stack,
+                           size_t &EntryDepth, size_t RequiredDepth) {
+    if (Stack.size() >= RequiredDepth) {
+      return;
+    }
+    size_t Deficit = RequiredDepth - Stack.size();
+    Stack.insert(Stack.begin(), Deficit, AbstractValue::unknown());
+    EntryDepth += Deficit;
+  }
+
+  void analyzeBlockBody(BlockInfo &Info, const uint8_t *Bytecode,
+                        size_t BytecodeSize, size_t &ScanPC,
+                        uint64_t &NextEntryPC, size_t &NextBodyStartPC,
+                        bool &HasNextBlock) {
     const auto *InstructionMetrics =
         evmc_get_instruction_metrics_table(Revision);
     const auto *InstructionNames = evmc_get_instruction_names_table(Revision);
@@ -168,157 +595,739 @@ public:
           evmc_get_instruction_names_table(zen::evm::DEFAULT_REVISION);
     }
 
-    // Initialize block info for the first block
-    BlockInfo CurInfo(0);
+    std::vector<AbstractValue> Stack;
+    size_t EntryDepth = 0;
+    Info.MaxStackHeight = 0;
+    Info.MinStackHeight = 0;
+    Info.MinPopHeight = 0;
+    Info.StackHeightDiff = 0;
+    Info.EntryStackDepth = 0;
+    Info.BodyEndPC = Info.BodyStartPC;
 
-    // JIT suitability tracking state
-    size_t CurConsecutiveExpensive = 0;
-    bool PrevWasDup = false;
+    auto updateHeights = [&]() {
+      int32_t RelativeHeight =
+          static_cast<int32_t>(Stack.size()) - static_cast<int32_t>(EntryDepth);
+      Info.StackHeightDiff = RelativeHeight;
+      Info.MaxStackHeight = std::max(Info.MaxStackHeight, RelativeHeight);
+      Info.MinStackHeight = std::min(Info.MinStackHeight, RelativeHeight);
+      Info.MinPopHeight =
+          std::min(Info.MinPopHeight, -static_cast<int32_t>(EntryDepth));
+    };
 
-    while (Ip < IpEnd) {
-      evmc_opcode Opcode = static_cast<evmc_opcode>(*Ip);
-      uint8_t OpcodeU8 = static_cast<uint8_t>(Opcode);
-      ptrdiff_t Diff = Ip - Bytecode;
-      PC = static_cast<uint64_t>(Diff >= 0 ? Diff : 0);
+    HasNextBlock = false;
+    NextEntryPC = 0;
+    NextBodyStartPC = BytecodeSize;
 
-      Ip++;
+    while (ScanPC < BytecodeSize) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
 
-      // --- JIT suitability: accumulate MIR estimate ---
-      JITResult.MirEstimate += MIR_OPCODE_WEIGHT[OpcodeU8];
-
-      // --- JIT suitability: RA-expensive pattern tracking ---
-      if (isRAExpensiveOpcode(OpcodeU8)) {
-        JITResult.RAExpensiveCount++;
-        CurInfo.RAExpensiveCount++;
-        CurConsecutiveExpensive++;
-        // DUP feedback: previous opcode was DUP, now RA-expensive
-        if (PrevWasDup) {
-          JITResult.DupFeedbackPatternCount++;
-        }
-        PrevWasDup = false;
-      } else if (isDupOrSwapOpcode(OpcodeU8)) {
-        // DUP/SWAP are transparent — don't break consecutive run
-        PrevWasDup = isDupOpcode(OpcodeU8);
-      } else {
-        // Any other opcode breaks the consecutive run
-        JITResult.MaxConsecutiveExpensive = std::max(
-            JITResult.MaxConsecutiveExpensive, CurConsecutiveExpensive);
-        CurConsecutiveExpensive = 0;
-        PrevWasDup = false;
+      if (Opcode == OP_JUMPDEST) {
+        uint64_t CanonicalPC =
+            getCanonicalJumpDestPC(static_cast<uint64_t>(ScanPC));
+        Info.Successors.push_back(CanonicalPC);
+        NextEntryPC = CanonicalPC;
+        NextBodyStartPC = static_cast<size_t>(CanonicalPC) + 1;
+        HasNextBlock = true;
+        Info.BodyEndPC = static_cast<uint64_t>(ScanPC);
+        break;
       }
 
-      // Check if opcode is undefined for current revision
       bool IsUndefined = (InstructionNames[Opcode] == nullptr);
       if (IsUndefined) {
-        CurInfo.HasUndefinedInstr = true;
+        Info.HasUndefinedInstr = true;
 #ifdef ZEN_ENABLE_JIT_FALLBACK_TEST
-        // Reset undefined instruction flag in fallback test
-        CurInfo.HasUndefinedInstr = false;
+        Info.HasUndefinedInstr = false;
 #endif
+        ++ScanPC;
+        Info.BodyEndPC = static_cast<uint64_t>(ScanPC);
+        skipDeadCode(Bytecode, BytecodeSize, ScanPC, NextEntryPC,
+                     NextBodyStartPC, HasNextBlock);
+        break;
       }
 
-      // Get stack metrics from the instruction metrics table
-      const auto &Metrics = InstructionMetrics[Opcode];
-      // stack_height_required equals PopCount
-      int PopCount = Metrics.stack_height_required;
-      // PushCount = PopCount + stack_height_change
-      int PushCount = PopCount + Metrics.stack_height_change;
-
-      // Handle PUSH instructions - need to skip the immediate bytes
-      if (Opcode >= OP_PUSH1 && Opcode <= OP_PUSH32) {
-        uint8_t PushBytes = Opcode - OP_PUSH0;
-        Ip += PushBytes;
+      uint8_t OpcodeU8 = static_cast<uint8_t>(Opcode);
+      if (isRAExpensiveOpcode(OpcodeU8)) {
+        Info.RAExpensiveCount++;
       }
 
-      // Update stack height
-      CurInfo.StackHeightDiff -= PopCount;
-      if (CurInfo.StackHeightDiff < CurInfo.MinStackHeight) {
-        CurInfo.MinStackHeight = CurInfo.StackHeightDiff;
-      }
-      if (!(Opcode >= OP_SWAP1 && Opcode <= OP_SWAP16) &&
-          !(Opcode >= OP_DUP1 && Opcode <= OP_DUP16)) {
-        CurInfo.MinPopHeight =
-            std::min(CurInfo.StackHeightDiff, CurInfo.MinPopHeight);
-      }
-      CurInfo.StackHeightDiff += PushCount;
-      if (CurInfo.StackHeightDiff > CurInfo.MaxStackHeight) {
-        CurInfo.MaxStackHeight = CurInfo.StackHeightDiff;
-      }
+      ++ScanPC;
+      size_t PushBytes = immediateSize(Opcode);
 
-      // Check if this is a block starting opcode
-      bool IsBlockStart = (Opcode == OP_JUMPDEST || Opcode == OP_JUMPI);
-      // Check if this is a block ending opcode
-      bool IsBlockEnd = (Opcode == OP_JUMP || Opcode == OP_RETURN ||
-                         Opcode == OP_STOP || Opcode == OP_INVALID ||
-                         Opcode == OP_REVERT || Opcode == OP_SELFDESTRUCT);
+      if (Opcode == OP_JUMP) {
+        ensureAbstractDepth(Stack, EntryDepth, 1);
+        AbstractValue Dest = Stack.back();
+        Stack.pop_back();
+        updateHeights();
 
-      if (IsBlockStart) {
-        if (PC != CurInfo.EntryPC) {
-          // Finalize block: update max block RA-expensive count
-          JITResult.MaxBlockExpensiveCount =
-              std::max(JITResult.MaxBlockExpensiveCount,
-                       static_cast<size_t>(CurInfo.RAExpensiveCount));
-          BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
+        if (Dest.KnownConst && Dest.FitsU64 && hasCanonicalJumpDest(Dest.Low)) {
+          Info.HasConstantJump = true;
+          Info.ConstantJumpTargetPC = getCanonicalJumpDestPC(Dest.Low);
+          Info.Successors.push_back(Info.ConstantJumpTargetPC);
+        } else {
+          Info.HasDynamicJump = true;
+          HasUnknownDynamicJump = true;
         }
-        // Create new block info
-        CurInfo = BlockInfo(PC);
-        if (Opcode == OP_JUMPDEST) {
-          CurInfo.IsJumpDest = true;
+        Info.BodyEndPC = static_cast<uint64_t>(ScanPC);
+        skipDeadCode(Bytecode, BytecodeSize, ScanPC, NextEntryPC,
+                     NextBodyStartPC, HasNextBlock);
+        if (Info.HasDynamicJump && HasNextBlock) {
+          Info.DynamicJumpTargetRegionEntryPC = NextEntryPC;
         }
-        // Block boundary also ends a consecutive run
-        JITResult.MaxConsecutiveExpensive = std::max(
-            JITResult.MaxConsecutiveExpensive, CurConsecutiveExpensive);
-        CurConsecutiveExpensive = 0;
-      } else if (IsBlockEnd) {
-        // Finalize block: update max block RA-expensive count
-        JITResult.MaxBlockExpensiveCount =
-            std::max(JITResult.MaxBlockExpensiveCount,
-                     static_cast<size_t>(CurInfo.RAExpensiveCount));
-        // Save current block info
-        BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
-        // Block boundary ends consecutive run
-        JITResult.MaxConsecutiveExpensive = std::max(
-            JITResult.MaxConsecutiveExpensive, CurConsecutiveExpensive);
-        CurConsecutiveExpensive = 0;
-        // Skip dead code
-        while (Ip < IpEnd) {
-          evmc_opcode NextOp = static_cast<evmc_opcode>(*Ip);
-          if (NextOp == OP_JUMPDEST) {
-            break;
+        break;
+      }
+
+      if (Opcode == OP_JUMPI) {
+        ensureAbstractDepth(Stack, EntryDepth, 2);
+        AbstractValue Dest = Stack.back();
+        Stack.pop_back();
+        Stack.pop_back();
+        updateHeights();
+
+        uint64_t FallthroughEntryPC = static_cast<uint64_t>(ScanPC);
+        size_t FallthroughBodyStartPC = ScanPC;
+        if (ScanPC < BytecodeSize &&
+            static_cast<evmc_opcode>(Bytecode[ScanPC]) == OP_JUMPDEST) {
+          FallthroughEntryPC = getCanonicalJumpDestPC(FallthroughEntryPC);
+          FallthroughBodyStartPC = static_cast<size_t>(FallthroughEntryPC) + 1;
+        }
+
+        Info.HasConditionalJump = true;
+        Info.Successors.push_back(FallthroughEntryPC);
+        if (Dest.KnownConst && Dest.FitsU64 && hasCanonicalJumpDest(Dest.Low)) {
+          Info.HasConstantJump = true;
+          Info.ConstantJumpTargetPC = getCanonicalJumpDestPC(Dest.Low);
+          if (Info.ConstantJumpTargetPC != FallthroughEntryPC) {
+            Info.Successors.push_back(Info.ConstantJumpTargetPC);
           }
-          Ip++;
-          if (NextOp >= OP_PUSH0 && NextOp <= OP_PUSH32) {
-            uint8_t NumBytes =
-                static_cast<uint8_t>(NextOp) - static_cast<uint8_t>(OP_PUSH0);
-            Ip += NumBytes;
-          }
+        } else if (!Dest.KnownConst || !Dest.FitsU64) {
+          Info.HasDynamicJump = true;
+          HasUnknownDynamicJump = true;
+          Info.DynamicJumpTargetRegionEntryPC = FallthroughEntryPC;
         }
+        NextEntryPC = FallthroughEntryPC;
+        NextBodyStartPC = FallthroughBodyStartPC;
+        HasNextBlock = true;
+        Info.BodyEndPC = static_cast<uint64_t>(ScanPC);
+        break;
+      }
+
+      if (isBlockTerminator(Opcode)) {
+        const auto &Metrics = InstructionMetrics[Opcode];
+        int PopCount = Metrics.stack_height_required;
+        int PushCount = PopCount + Metrics.stack_height_change;
+        ensureAbstractDepth(Stack, EntryDepth, static_cast<size_t>(PopCount));
+        for (int I = 0; I < PopCount; ++I) {
+          Stack.pop_back();
+        }
+        for (int I = 0; I < PushCount; ++I) {
+          Stack.push_back(AbstractValue::unknown());
+        }
+        updateHeights();
+        Info.BodyEndPC = static_cast<uint64_t>(ScanPC);
+        skipDeadCode(Bytecode, BytecodeSize, ScanPC, NextEntryPC,
+                     NextBodyStartPC, HasNextBlock);
+        break;
+      }
+
+      if (Opcode >= OP_DUP1 && Opcode <= OP_DUP16) {
+        size_t RequiredDepth = static_cast<size_t>(Opcode - OP_DUP1 + 1);
+        ensureAbstractDepth(Stack, EntryDepth, RequiredDepth);
+        Stack.push_back(Stack[Stack.size() - RequiredDepth]);
+        updateHeights();
+      } else if (Opcode >= OP_SWAP1 && Opcode <= OP_SWAP16) {
+        size_t RequiredDepth = static_cast<size_t>(Opcode - OP_SWAP1 + 2);
+        ensureAbstractDepth(Stack, EntryDepth, RequiredDepth);
+        std::swap(Stack.back(), Stack[Stack.size() - RequiredDepth]);
+        updateHeights();
+      } else if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+        Stack.push_back(AbstractValue::constFromPush(Bytecode, BytecodeSize,
+                                                     ScanPC, PushBytes));
+        ScanPC += PushBytes;
+        updateHeights();
+      } else {
+        const auto &Metrics = InstructionMetrics[Opcode];
+        int PopCount = Metrics.stack_height_required;
+        int PushCount = PopCount + Metrics.stack_height_change;
+        ensureAbstractDepth(Stack, EntryDepth, static_cast<size_t>(PopCount));
+        for (int I = 0; I < PopCount; ++I) {
+          Stack.pop_back();
+        }
+        for (int I = 0; I < PushCount; ++I) {
+          Stack.push_back(AbstractValue::unknown());
+        }
+        updateHeights();
       }
     }
-    // Finalize last block and consecutive run
-    JITResult.MaxConsecutiveExpensive =
-        std::max(JITResult.MaxConsecutiveExpensive, CurConsecutiveExpensive);
-    if (BlockInfos.count(CurInfo.EntryPC) == 0) {
-      JITResult.MaxBlockExpensiveCount =
-          std::max(JITResult.MaxBlockExpensiveCount,
-                   static_cast<size_t>(CurInfo.RAExpensiveCount));
-      BlockInfos.emplace(CurInfo.EntryPC, CurInfo);
+
+    if (ScanPC >= BytecodeSize) {
+      Info.BodyEndPC = static_cast<uint64_t>(BytecodeSize);
     }
 
-    // Compute final fallback verdict
-    JITResult.ShouldFallback =
-        BytecodeSize > MAX_JIT_BYTECODE_SIZE ||
-        JITResult.MirEstimate > MAX_JIT_MIR_ESTIMATE ||
-        JITResult.MaxConsecutiveExpensive > MAX_CONSECUTIVE_RA_EXPENSIVE ||
-        JITResult.MaxBlockExpensiveCount > MAX_BLOCK_RA_EXPENSIVE ||
-        JITResult.DupFeedbackPatternCount > MAX_DUP_FEEDBACK_PATTERN;
-
-    return true;
+    Info.EntryStackDepth = static_cast<int32_t>(EntryDepth);
+    Info.MinStackHeight = std::min(Info.MinStackHeight, -Info.EntryStackDepth);
+    Info.MinPopHeight = std::min(Info.MinPopHeight, -Info.EntryStackDepth);
+    Info.StackHeightDiff =
+        static_cast<int32_t>(Stack.size()) - static_cast<int32_t>(EntryDepth);
   }
 
-private:
+  void skipDeadCode(const uint8_t *Bytecode, size_t BytecodeSize,
+                    size_t &ScanPC, uint64_t &NextEntryPC,
+                    size_t &NextBodyStartPC, bool &HasNextBlock) {
+    while (ScanPC < BytecodeSize) {
+      evmc_opcode NextOp = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+      if (NextOp == OP_JUMPDEST) {
+        uint64_t CanonicalPC =
+            getCanonicalJumpDestPC(static_cast<uint64_t>(ScanPC));
+        NextEntryPC = CanonicalPC;
+        NextBodyStartPC = static_cast<size_t>(CanonicalPC) + 1;
+        HasNextBlock = true;
+        return;
+      }
+      ScanPC += 1 + immediateSize(NextOp);
+    }
+    HasNextBlock = false;
+  }
+
+  void buildBlocks(const uint8_t *Bytecode, size_t BytecodeSize) {
+    if (BytecodeSize == 0) {
+      BlockInfos.emplace(0, BlockInfo(0, 0, false));
+      EntryBlockPC = 0;
+      return;
+    }
+
+    size_t BodyStartPC = 0;
+    bool StartsWithJumpDest =
+        static_cast<evmc_opcode>(Bytecode[0]) == OP_JUMPDEST;
+    bool IsJumpDestBlock = false;
+    if (StartsWithJumpDest) {
+      EntryBlockPC = getCanonicalJumpDestPC(0);
+      BodyStartPC = static_cast<size_t>(EntryBlockPC) + 1;
+      IsJumpDestBlock = true;
+    } else {
+      EntryBlockPC = 0;
+    }
+
+    uint64_t CurEntryPC = EntryBlockPC;
+    while (true) {
+      BlockInfo Info(CurEntryPC, BodyStartPC, IsJumpDestBlock);
+      size_t ScanPC = BodyStartPC;
+      uint64_t NextEntryPC = 0;
+      size_t NextBodyStartPC = BytecodeSize;
+      bool HasNextBlock = false;
+      analyzeBlockBody(Info, Bytecode, BytecodeSize, ScanPC, NextEntryPC,
+                       NextBodyStartPC, HasNextBlock);
+      BlockInfos[CurEntryPC] = Info;
+      if (!HasNextBlock) {
+        break;
+      }
+      CurEntryPC = NextEntryPC;
+      BodyStartPC = NextBodyStartPC;
+      IsJumpDestBlock = hasCanonicalJumpDest(CurEntryPC) &&
+                        getCanonicalJumpDestPC(CurEntryPC) == CurEntryPC;
+      if (BodyStartPC > BytecodeSize) {
+        break;
+      }
+    }
+  }
+
+  void linkPredecessors() {
+    for (auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      for (uint64_t Succ : Info.Successors) {
+        auto It = BlockInfos.find(Succ);
+        if (It == BlockInfos.end()) {
+          continue;
+        }
+        auto &Preds = It->second.Predecessors;
+        if (std::find(Preds.begin(), Preds.end(), Info.EntryPC) ==
+            Preds.end()) {
+          Preds.push_back(Info.EntryPC);
+        }
+      }
+    }
+  }
+
+  void invalidateReachableEntryDepths(uint64_t EntryPC) {
+    std::queue<uint64_t> InvalidateWorkList;
+    std::map<uint64_t, bool> InvalidateVisited;
+    InvalidateWorkList.push(EntryPC);
+    InvalidateVisited[EntryPC] = true;
+
+    while (!InvalidateWorkList.empty()) {
+      uint64_t InvalidPC = InvalidateWorkList.front();
+      InvalidateWorkList.pop();
+      auto InvalidIt = BlockInfos.find(InvalidPC);
+      if (InvalidIt == BlockInfos.end()) {
+        continue;
+      }
+      auto &InvalidInfo = InvalidIt->second;
+      InvalidInfo.HasInconsistentEntryDepth = true;
+      InvalidInfo.ResolvedEntryStackDepth = -1;
+      InvalidInfo.ResolvedExitStackDepth = -1;
+      for (uint64_t NextSucc : InvalidInfo.Successors) {
+        if (InvalidateVisited.emplace(NextSucc, true).second) {
+          InvalidateWorkList.push(NextSucc);
+        }
+      }
+    }
+  }
+
+  void resolveEntryDepths() {
+    auto EntryIt = BlockInfos.find(EntryBlockPC);
+    if (EntryIt == BlockInfos.end()) {
+      return;
+    }
+
+    EntryIt->second.ResolvedEntryStackDepth = 0;
+    std::queue<uint64_t> WorkList;
+    WorkList.push(EntryBlockPC);
+    propagateEntryDepths(WorkList);
+  }
+
+  void propagateEntryDepths(std::queue<uint64_t> &WorkList) {
+    while (!WorkList.empty()) {
+      uint64_t EntryPC = WorkList.front();
+      WorkList.pop();
+      auto &Info = BlockInfos[EntryPC];
+      if (Info.ResolvedEntryStackDepth < 0) {
+        continue;
+      }
+
+      int32_t ExitDepth = Info.ResolvedEntryStackDepth + Info.StackHeightDiff;
+      Info.ResolvedExitStackDepth = ExitDepth;
+
+      for (uint64_t Succ : Info.Successors) {
+        auto SuccIt = BlockInfos.find(Succ);
+        if (SuccIt == BlockInfos.end()) {
+          continue;
+        }
+        auto &SuccInfo = SuccIt->second;
+        if (SuccInfo.HasInconsistentEntryDepth) {
+          continue;
+        }
+        if (SuccInfo.ResolvedEntryStackDepth < 0) {
+          SuccInfo.ResolvedEntryStackDepth = ExitDepth;
+          WorkList.push(Succ);
+        } else if (SuccInfo.ResolvedEntryStackDepth != ExitDepth) {
+          invalidateReachableEntryDepths(Succ);
+        }
+      }
+    }
+  }
+
+  std::vector<uint64_t> collectReachableDynamicJumpRegions() const {
+    std::vector<uint64_t> Regions;
+    for (const auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      if (!Info.HasDynamicJump || Info.ResolvedEntryStackDepth < 0 ||
+          Info.DynamicJumpTargetRegionEntryPC == 0) {
+        continue;
+      }
+      if (std::find(Regions.begin(), Regions.end(),
+                    Info.DynamicJumpTargetRegionEntryPC) == Regions.end()) {
+        Regions.push_back(Info.DynamicJumpTargetRegionEntryPC);
+      }
+    }
+    return Regions;
+  }
+
+  static bool hasDynamicJumpRegion(const BlockInfo &Info,
+                                   uint64_t RegionEntryPC) {
+    return std::find(Info.DynamicJumpTargetRegions.begin(),
+                     Info.DynamicJumpTargetRegions.end(),
+                     RegionEntryPC) != Info.DynamicJumpTargetRegions.end();
+  }
+
+  static void addDynamicJumpRegion(BlockInfo &Info, uint64_t RegionEntryPC) {
+    if (!hasDynamicJumpRegion(Info, RegionEntryPC)) {
+      Info.DynamicJumpTargetRegions.push_back(RegionEntryPC);
+    }
+  }
+
+  static void appendUniqueBlockPC(std::vector<uint64_t> &BlockPCs,
+                                  uint64_t BlockPC) {
+    if (std::find(BlockPCs.begin(), BlockPCs.end(), BlockPC) ==
+        BlockPCs.end()) {
+      BlockPCs.push_back(BlockPC);
+    }
+  }
+
+  std::vector<uint64_t>
+  collectDynamicJumpSourceBlocksForInfo(const BlockInfo &Info) const {
+    std::vector<uint64_t> SourceBlockPCs;
+    if (Info.HasCompatibleDynamicJumpTargetShape) {
+      for (const auto &[EntryPC, RegionSourceInfo] : BlockInfos) {
+        if (!RegionSourceInfo.HasDynamicJump ||
+            RegionSourceInfo.ResolvedEntryStackDepth < 0) {
+          continue;
+        }
+        if (blocksShareCompatibleDynamicJumpShapeClass(EntryPC, Info.EntryPC)) {
+          appendUniqueBlockPC(SourceBlockPCs, EntryPC);
+        }
+      }
+      return SourceBlockPCs;
+    }
+
+    if (Info.DynamicJumpTargetRegions.empty()) {
+      if (!HasUnknownDynamicJump || !Info.IsDynamicJumpTargetCandidate) {
+        return SourceBlockPCs;
+      }
+      for (const auto &[EntryPC, RegionSourceInfo] : BlockInfos) {
+        if (!RegionSourceInfo.HasDynamicJump ||
+            RegionSourceInfo.ResolvedEntryStackDepth < 0) {
+          continue;
+        }
+        appendUniqueBlockPC(SourceBlockPCs, EntryPC);
+      }
+      return SourceBlockPCs;
+    }
+
+    for (uint64_t RegionEntryPC : Info.DynamicJumpTargetRegions) {
+      for (const auto &[EntryPC, RegionSourceInfo] : BlockInfos) {
+        if (!RegionSourceInfo.HasDynamicJump ||
+            RegionSourceInfo.DynamicJumpTargetRegionEntryPC != RegionEntryPC) {
+          continue;
+        }
+        appendUniqueBlockPC(SourceBlockPCs, EntryPC);
+      }
+    }
+    return SourceBlockPCs;
+  }
+
+  bool getUniformDynamicJumpEntryDepthForRegion(uint64_t RegionEntryPC,
+                                                int32_t &EntryDepth) const {
+    bool SawDynamicJump = false;
+    for (const auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      if (!Info.HasDynamicJump ||
+          Info.DynamicJumpTargetRegionEntryPC != RegionEntryPC) {
+        continue;
+      }
+      if (Info.ResolvedEntryStackDepth < 0) {
+        continue;
+      }
+      if (Info.ResolvedExitStackDepth < 0) {
+        return false;
+      }
+      if (!SawDynamicJump) {
+        EntryDepth = Info.ResolvedExitStackDepth;
+        SawDynamicJump = true;
+        continue;
+      }
+      if (EntryDepth != Info.ResolvedExitStackDepth) {
+        return false;
+      }
+    }
+    return SawDynamicJump;
+  }
+
+  void markDynamicJumpTargetCandidates() {
+    for (auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      Info.IsDynamicJumpTargetCandidate = false;
+      Info.HasCompatibleDynamicJumpTargetShape = false;
+      Info.DynamicJumpTargetRegions.clear();
+    }
+
+    if (!HasUnknownDynamicJump) {
+      return;
+    }
+
+    const std::vector<uint64_t> Regions = collectReachableDynamicJumpRegions();
+    if (Regions.empty()) {
+      for (auto &[EntryPC, Info] : BlockInfos) {
+        (void)EntryPC;
+        if (Info.IsJumpDest) {
+          Info.IsDynamicJumpTargetCandidate = true;
+        }
+      }
+      return;
+    }
+
+    for (uint64_t RegionEntryPC : Regions) {
+      std::queue<uint64_t> WorkList;
+      std::map<uint64_t, bool> Visited;
+      Visited[RegionEntryPC] = true;
+      WorkList.push(RegionEntryPC);
+
+      while (!WorkList.empty()) {
+        uint64_t BlockPC = WorkList.front();
+        WorkList.pop();
+        auto It = BlockInfos.find(BlockPC);
+        if (It == BlockInfos.end()) {
+          continue;
+        }
+        auto &Info = It->second;
+        if (Info.IsJumpDest) {
+          Info.IsDynamicJumpTargetCandidate = true;
+          addDynamicJumpRegion(Info, RegionEntryPC);
+        }
+        for (uint64_t SuccPC : Info.Successors) {
+          if (Visited.emplace(SuccPC, true).second) {
+            WorkList.push(SuccPC);
+          }
+        }
+      }
+    }
+
+    // The runtime indirect-jump lowering validates against the full
+    // JUMPDEST table, not just blocks reachable from the analyzer's
+    // fallthrough region approximation. Any remaining JUMPDEST must therefore
+    // stay on the conservative dynamic-target path.
+    for (auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      if (Info.IsJumpDest && !Info.IsDynamicJumpTargetCandidate) {
+        Info.IsDynamicJumpTargetCandidate = true;
+      }
+    }
+  }
+
+  struct DynamicJumpTargetShape {
+    int32_t FullEntryStateDepth = -1;
+    int32_t HiddenLiveInPrefixDepth = 0;
+    bool RequiresEntryMergeState = false;
+
+    bool operator==(const DynamicJumpTargetShape &Other) const {
+      return FullEntryStateDepth == Other.FullEntryStateDepth &&
+             HiddenLiveInPrefixDepth == Other.HiddenLiveInPrefixDepth &&
+             RequiresEntryMergeState == Other.RequiresEntryMergeState;
+    }
+  };
+
+  struct DynamicJumpShapeClassKey {
+    int32_t FullEntryStateDepth = -1;
+    int32_t HiddenLiveInPrefixDepth = 0;
+    bool RequiresEntryMergeState = false;
+
+    bool operator<(const DynamicJumpShapeClassKey &Other) const {
+      if (FullEntryStateDepth != Other.FullEntryStateDepth) {
+        return FullEntryStateDepth < Other.FullEntryStateDepth;
+      }
+      if (HiddenLiveInPrefixDepth != Other.HiddenLiveInPrefixDepth) {
+        return HiddenLiveInPrefixDepth < Other.HiddenLiveInPrefixDepth;
+      }
+      return RequiresEntryMergeState < Other.RequiresEntryMergeState;
+    }
+  };
+
+  void resolveDynamicJumpTargetEntryDepths() {
+    if (!HasUnknownDynamicJump) {
+      return;
+    }
+
+    for (uint64_t RegionEntryPC : collectReachableDynamicJumpRegions()) {
+      int32_t DynamicJumpEntryDepth = -1;
+      if (!getUniformDynamicJumpEntryDepthForRegion(RegionEntryPC,
+                                                    DynamicJumpEntryDepth)) {
+        continue;
+      }
+
+      std::queue<uint64_t> WorkList;
+      for (auto &[EntryPC, Info] : BlockInfos) {
+        (void)EntryPC;
+        if (!hasDynamicJumpRegion(Info, RegionEntryPC) ||
+            Info.HasInconsistentEntryDepth) {
+          continue;
+        }
+        if (Info.ResolvedEntryStackDepth < 0) {
+          Info.ResolvedEntryStackDepth = DynamicJumpEntryDepth;
+          WorkList.push(Info.EntryPC);
+          continue;
+        }
+        if (Info.ResolvedEntryStackDepth != DynamicJumpEntryDepth) {
+          invalidateReachableEntryDepths(Info.EntryPC);
+        }
+      }
+
+      propagateEntryDepths(WorkList);
+    }
+  }
+
+  bool hasCompatibleDynamicJumpTargetsForRegion(uint64_t RegionEntryPC) const {
+    int32_t DynamicJumpEntryDepth = -1;
+    if (!getUniformDynamicJumpEntryDepthForRegion(RegionEntryPC,
+                                                  DynamicJumpEntryDepth)) {
+      return false;
+    }
+    DynamicJumpTargetShape ExpectedShape;
+    bool SawJumpDest = false;
+    for (const auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      if (!hasDynamicJumpRegion(Info, RegionEntryPC)) {
+        continue;
+      }
+      if (!Info.IsEntryStateCompatible) {
+        return false;
+      }
+      if (Info.FullEntryStateDepth != DynamicJumpEntryDepth) {
+        return false;
+      }
+
+      DynamicJumpTargetShape CurrentShape = {
+          Info.FullEntryStateDepth,
+          Info.HiddenLiveInPrefixDepth,
+          Info.RequiresEntryMergeState,
+      };
+      if (!SawJumpDest) {
+        ExpectedShape = CurrentShape;
+        SawJumpDest = true;
+        continue;
+      }
+      if (!(ExpectedShape == CurrentShape)) {
+        return false;
+      }
+    }
+    return SawJumpDest;
+  }
+
+  bool hasGloballyIncompatibleDynamicJumpSource(uint64_t TargetBlockPC) const {
+    auto It = BlockInfos.find(TargetBlockPC);
+    if (It == BlockInfos.end() || !It->second.IsDynamicJumpTargetCandidate ||
+        !It->second.HasCompatibleDynamicJumpTargetShape) {
+      return false;
+    }
+
+    const std::vector<uint64_t> TargetRegions =
+        It->second.DynamicJumpTargetRegions;
+    for (const auto &[EntryPC, Info] : BlockInfos) {
+      if (!Info.HasDynamicJump || Info.ResolvedEntryStackDepth < 0 ||
+          Info.DynamicJumpTargetRegionEntryPC == 0) {
+        continue;
+      }
+      if (!TargetRegions.empty() &&
+          std::find(TargetRegions.begin(), TargetRegions.end(),
+                    Info.DynamicJumpTargetRegionEntryPC) ==
+              TargetRegions.end()) {
+        continue;
+      }
+      if (!blocksShareCompatibleDynamicJumpShapeClass(EntryPC, TargetBlockPC)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void finalizeLiftability() {
+    for (auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      bool EntryKnown = Info.IsEntryStateCompatible;
+      bool DynamicJumpDestConflict = HasUnknownDynamicJump &&
+                                     Info.IsDynamicJumpTargetCandidate &&
+                                     !Info.HasCompatibleDynamicJumpTargetShape;
+      Info.CanLiftStack = EntryKnown && !Info.HasUndefinedInstr &&
+                          !Info.HasInconsistentEntryDepth &&
+                          !DynamicJumpDestConflict;
+      if (Info.CanLiftStack && Info.IsDynamicJumpTargetCandidate &&
+          Info.HasDeferredEntryMerge && Info.HiddenLiveInPrefixDepth > 0 &&
+          getDynamicJumpSourceBlocksForBlock(EntryPC).empty()) {
+        Info.CanLiftStack = false;
+      }
+    }
+  }
+
+  void finalizeEntryShapeMetadata() {
+    for (auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      Info.FullEntryStateDepth = Info.ResolvedEntryStackDepth;
+      Info.IsEntryStateCompatible =
+          Info.ResolvedEntryStackDepth >= 0 && !Info.HasInconsistentEntryDepth;
+      Info.HiddenLiveInPrefixDepth = 0;
+      Info.HasHiddenLiveInPrefix = false;
+      if (Info.IsEntryStateCompatible &&
+          Info.ResolvedEntryStackDepth > Info.EntryStackDepth) {
+        Info.HiddenLiveInPrefixDepth =
+            Info.ResolvedEntryStackDepth - Info.EntryStackDepth;
+        Info.HasHiddenLiveInPrefix = Info.HiddenLiveInPrefixDepth > 0;
+      }
+      Info.RequiresEntryMergeState =
+          Info.IsEntryStateCompatible &&
+          getPotentialEntryPredecessorsForBlock(EntryPC).size() > 1;
+      Info.HasDeferredEntryMerge = false;
+    }
+
+    std::map<uint64_t, bool> CompatibleDynamicJumpRegions;
+    for (uint64_t RegionEntryPC : collectReachableDynamicJumpRegions()) {
+      CompatibleDynamicJumpRegions[RegionEntryPC] =
+          hasCompatibleDynamicJumpTargetsForRegion(RegionEntryPC);
+    }
+
+    finalizeDynamicJumpRegionMetadata(CompatibleDynamicJumpRegions);
+
+    for (auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      bool AllCompatibleRegions = Info.IsDynamicJumpTargetCandidate;
+      for (uint64_t RegionEntryPC : Info.DynamicJumpTargetRegions) {
+        auto It = CompatibleDynamicJumpRegions.find(RegionEntryPC);
+        if (It == CompatibleDynamicJumpRegions.end() || !It->second) {
+          AllCompatibleRegions = false;
+          break;
+        }
+      }
+      Info.HasCompatibleDynamicJumpTargetShape = AllCompatibleRegions;
+      if (Info.HasCompatibleDynamicJumpTargetShape &&
+          hasGloballyIncompatibleDynamicJumpSource(EntryPC)) {
+        Info.HasCompatibleDynamicJumpTargetShape = false;
+      }
+      Info.HasDeferredEntryMerge = Info.HasCompatibleDynamicJumpTargetShape;
+    }
+  }
+
+  void finalizeDynamicJumpRegionMetadata(
+      const std::map<uint64_t, bool> &CompatibleDynamicJumpRegions) {
+    DynamicJumpRegions.clear();
+
+    std::map<DynamicJumpShapeClassKey, uint32_t> ShapeClassIds;
+    uint32_t NextShapeClassId = 1;
+
+    for (uint64_t RegionEntryPC : collectReachableDynamicJumpRegions()) {
+      auto &RegionInfo = DynamicJumpRegions[RegionEntryPC];
+      RegionInfo.RegionEntryPC = RegionEntryPC;
+      RegionInfo.HasCompatibleTargetShape =
+          CompatibleDynamicJumpRegions.count(RegionEntryPC) != 0 &&
+          CompatibleDynamicJumpRegions.at(RegionEntryPC);
+      RegionInfo.HasUniformEntryDepth =
+          getUniformDynamicJumpEntryDepthForRegion(
+              RegionEntryPC, RegionInfo.UniformEntryDepth);
+
+      for (const auto &[EntryPC, Info] : BlockInfos) {
+        if (Info.HasDynamicJump &&
+            Info.DynamicJumpTargetRegionEntryPC == RegionEntryPC) {
+          RegionInfo.SourceBlocks.push_back(EntryPC);
+        }
+        if (!hasDynamicJumpRegion(Info, RegionEntryPC)) {
+          continue;
+        }
+        RegionInfo.TargetBlocks.push_back(EntryPC);
+        if (!RegionInfo.HasCompatibleTargetShape) {
+          continue;
+        }
+        RegionInfo.FullEntryStateDepth = Info.FullEntryStateDepth;
+        RegionInfo.HiddenLiveInPrefixDepth = Info.HiddenLiveInPrefixDepth;
+        RegionInfo.RequiresEntryMergeState = Info.RequiresEntryMergeState;
+      }
+
+      if (!RegionInfo.HasCompatibleTargetShape) {
+        continue;
+      }
+
+      DynamicJumpShapeClassKey ShapeKey = {
+          RegionInfo.FullEntryStateDepth,
+          RegionInfo.HiddenLiveInPrefixDepth,
+          RegionInfo.RequiresEntryMergeState,
+      };
+      auto [It, Inserted] = ShapeClassIds.emplace(ShapeKey, NextShapeClassId);
+      if (Inserted) {
+        ++NextShapeClassId;
+      }
+      RegionInfo.ShapeClassId = It->second;
+    }
+  }
+
   std::map<uint64_t, BlockInfo> BlockInfos;
-  uint64_t PC = 0;
+  std::map<uint64_t, DynamicJumpRegionInfo> DynamicJumpRegions;
+  std::map<uint64_t, uint64_t> JumpDestCanonicalPCs;
+  uint64_t EntryBlockPC = 0;
+  bool HasUnknownDynamicJump = false;
   evmc_revision Revision = zen::evm::DEFAULT_REVISION;
   JITSuitabilityResult JITResult;
 };

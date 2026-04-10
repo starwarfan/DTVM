@@ -15,6 +15,10 @@
 #include <memory>
 #include <string>
 
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+#include "compiler/evm_frontend/evm_analyzer.h"
+#endif
+
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
 #include "compiler/evm_compiler.h"
 #endif
@@ -24,6 +28,31 @@
 #endif
 
 namespace zen::runtime {
+
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+namespace {
+
+bool hasUnresolvedCompatibleDynamicReturnTrampoline(
+    const COMPILER::EVMAnalyzer &Analyzer) {
+  for (const auto &[EntryPC, Info] : Analyzer.getBlockInfos()) {
+    if (!Info.HasDynamicJump) {
+      continue;
+    }
+    if (Analyzer.getOutgoingCompatibleDynamicJumpShapeClassForBlock(EntryPC) ==
+        0) {
+      continue;
+    }
+    if (!Analyzer
+             .canTransferCompatibleDynamicJumpTargetsWithoutRuntimeMaterialization(
+                 EntryPC)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+#endif
 
 EVMModule::EVMModule(Runtime *RT)
     : BaseModule(RT, ModuleType::EVM), Code(nullptr), CodeSize(0) {
@@ -77,7 +106,9 @@ EVMModuleUniquePtr EVMModule::newEVMModule(Runtime &RT,
     COMPILER::EVMAnalyzer Analyzer(Rev);
     Analyzer.analyze(reinterpret_cast<const uint8_t *>(Mod->Code),
                      Mod->CodeSize);
-    Mod->ShouldFallbackToInterp = Analyzer.getJITSuitability().ShouldFallback;
+    Mod->ShouldFallbackToInterp =
+        Analyzer.getJITSuitability().ShouldFallback ||
+        hasUnresolvedCompatibleDynamicReturnTrampoline(Analyzer);
     if (!Mod->ShouldFallbackToInterp)
 #endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
     {
