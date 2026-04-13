@@ -5,12 +5,12 @@
 #include "common/enums.h"
 #include "common/errors.h"
 #include "evm/interpreter.h"
+#include "evm/opcode_handlers.h"
 #include "runtime/config.h"
 #include "runtime/evm_instance.h"
 #include "runtime/isolation.h"
 #include "runtime/runtime.h"
 #include "wrapped_host.h"
-#include <algorithm>
 
 #include <evmc/evmc.h>
 #include <evmc/evmc.hpp>
@@ -96,11 +96,11 @@ struct CodeAddrRevEqual {
   }
 };
 
-/// Validate that the cached module's code matches the provided code.
-/// Use full-byte comparison to avoid stale-module reuse when an address is
-/// re-created with different bytecode (e.g. SELFDESTRUCT + CREATE2).
-/// Partial head/tail checks can miss middle-of-code differences and lead to
-/// deterministic-but-wrong execution.
+/// Validate that the cached module's code matches the provided code exactly.
+/// The L1 cache is keyed by (code_address, revision); Ethereum assumes deployed
+/// code at an address is immutable, but hosts/tests may violate that, and a
+/// head/tail-only check can false-match different bytecodes of the same length.
+/// Full comparison is O(code size); EIP-170 caps contract code at 24 KiB.
 bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
                        const EVMModule *Mod) {
   if (CodeSize != Mod->CodeSize)
@@ -476,7 +476,10 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   auto &Ctx = *CtxPtr;
   zen::evm::BaseInterpreter Interpreter(Ctx);
   Ctx.allocTopFrame(&MsgWithCode);
-  Interpreter.interpret();
+  {
+    zen::evm::EVMResource::ClearGuard ClearTls;
+    Interpreter.interpret();
+  }
 
   evmc::Result Result =
       std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
