@@ -5,12 +5,12 @@
 #include "common/enums.h"
 #include "common/errors.h"
 #include "evm/interpreter.h"
+#include "evm/opcode_handlers.h"
 #include "runtime/config.h"
 #include "runtime/evm_instance.h"
 #include "runtime/isolation.h"
 #include "runtime/runtime.h"
 #include "wrapped_host.h"
-#include <algorithm>
 
 #include <evmc/evmc.h>
 #include <evmc/evmc.hpp>
@@ -131,12 +131,11 @@ deriveMemorySpecializationProfile(const evmc_message *Msg) {
       Msg ? Msg->input_data : nullptr, Msg ? Msg->input_size : 0);
 }
 
-/// Validate that the cached module's code matches the provided code.
-/// Note: This relies on the host guaranteeing that deployed code at a given
-/// address is immutable. We only check the head and tail (up to 256 bytes each)
-/// as a defense-in-depth measure against accidental cache corruption.
-/// For fully untrusted environments where hosts might reuse addresses for
-/// different bytecode, a full CRC/hash check should be implemented instead.
+/// Validate that the cached module's code matches the provided code exactly.
+/// The L1 cache is keyed by (code_address, revision); Ethereum assumes deployed
+/// code at an address is immutable, but hosts/tests may violate that, and a
+/// head/tail-only check can false-match different bytecodes of the same length.
+/// Full comparison is O(code size); EIP-170 caps contract code at 24 KiB.
 bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
                        const EVMModule *Mod) {
   if (CodeSize != Mod->CodeSize)
@@ -144,16 +143,7 @@ bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
   if (CodeSize == 0)
     return true;
   auto *ModCode = reinterpret_cast<const uint8_t *>(Mod->Code);
-  size_t HeadLen = std::min(CodeSize, static_cast<size_t>(256));
-  if (std::memcmp(Code, ModCode, HeadLen) != 0)
-    return false;
-  if (CodeSize > 256) {
-    size_t TailLen = std::min(CodeSize, static_cast<size_t>(256));
-    size_t TailOffset = CodeSize - TailLen;
-    if (std::memcmp(Code + TailOffset, ModCode + TailOffset, TailLen) != 0)
-      return false;
-  }
-  return true;
+  return std::memcmp(Code, ModCode, CodeSize) == 0;
 }
 
 bool parseBoolEnvValue(const char *Value, bool &ParsedValue) {
@@ -320,7 +310,7 @@ bool shouldUsePersistentModuleCache(const evmc_message *Msg) {
   // Regular calls (CALL/DELEGATECALL/STATICCALL/CALLCODE) at any depth are
   // safe to cache: EVM guarantees that deployed code at a given address is
   // immutable. The module is keyed by (code_address, revision) and a
-  // defense-in-depth head/tail validation is performed before reuse. Each
+  // full bytecode validation is performed before reuse. Each
   // nested call gets its own EVMInstance so reentrancy is safe.
   return Msg != nullptr && Msg->kind != EVMC_CREATE &&
          Msg->kind != EVMC_CREATE2;
@@ -574,7 +564,10 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   auto &Ctx = *CtxPtr;
   zen::evm::BaseInterpreter Interpreter(Ctx);
   Ctx.allocTopFrame(&MsgWithCode);
-  Interpreter.interpret();
+  {
+    zen::evm::EVMResource::ClearGuard ClearTls;
+    Interpreter.interpret();
+  }
 
   evmc::Result Result =
       std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
