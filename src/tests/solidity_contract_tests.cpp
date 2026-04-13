@@ -247,7 +247,7 @@ GTEST_API_ int main(int argc, char **argv) {
                   "Number of threads for multipass JIT(set 0 for automatic "
                   "determination)")
       ->excludes(DMMOption);
-  CLIParser.add_flag("--enable-multipass-lazy", Config.EnableMultipassLazy,
+  CLIParser.add_flag("--enable-background-jit", Config.EnableBackgroundJIT,
                      "Enable multipass lazy mode(on request compile)");
 #endif // ZEN_ENABLE_MULTIPASS_JIT
   CLI11_PARSE(CLIParser, argc, argv);

@@ -279,26 +279,6 @@ void EVMMirBuilder::initEVM(CompilerContext *Context) {
   ReturnBB = createBasicBlock();
   loadEVMInstanceAttr();
 
-  // OSR entry: check if we should start at a specific PC instead of PC=0
-  const int32_t OSRPCOffset = zen::runtime::EVMInstance::getOSRPCOffset();
-  MInstruction *OSRPCVal = getInstanceElement(&Ctx.I64Type, OSRPCOffset);
-  // Clear OSRPC in instance
-  MInstruction *Zero = createIntConstInstruction(&Ctx.I64Type, 0);
-  setInstanceElement(&Ctx.I64Type, Zero, OSRPCOffset);
-  // Save for later use in OSR dispatch
-  OSRPCVar = CurFunc->createVariable(&Ctx.I64Type);
-  createInstruction<DassignInstruction>(true, &Ctx.VoidType, OSRPCVal,
-                                        OSRPCVar->getVarIdx());
-  // Create OSR dispatch BB (populated in finalizeOSR after all JUMPDESTs)
-  OSRDispatchBB = createBasicBlock();
-  MInstruction *OSRCheck = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_NE, &Ctx.I64Type, OSRPCVal, Zero);
-  MBasicBlock *NormalEntryBB = createBasicBlock();
-  createInstruction<BrIfInstruction>(true, Ctx, OSRCheck, OSRDispatchBB,
-                                     NormalEntryBB);
-  addSuccessor(OSRDispatchBB);
-  addSuccessor(NormalEntryBB);
-  setInsertBlock(NormalEntryBB);
   // Normal execution continues from here (bytecode at PC=0)
 
   GasChunkEnd = EvmCtx->getGasChunkEnd();
@@ -318,33 +298,7 @@ void EVMMirBuilder::initEVM(CompilerContext *Context) {
 #endif // ZEN_ENABLE_LINUX_PERF
 }
 
-void EVMMirBuilder::finalizeOSR() {
-  if (!OSRDispatchBB)
-    return;
-
-  MBasicBlock *SavedBB = CurBB;
-  setInsertBlock(OSRDispatchBB);
-
-  if (IndirectJumpBB) {
-    // Set JumpTargetVar to OSRPC and dispatch via existing jump table
-    MInstruction *OSRTarget = loadVariable(OSRPCVar);
-    createInstruction<DassignInstruction>(true, &Ctx.VoidType, OSRTarget,
-                                          JumpTargetVar->getVarIdx());
-    createInstruction<BrInstruction>(true, Ctx, IndirectJumpBB);
-    addSuccessor(IndirectJumpBB);
-  } else {
-    // No JUMPDEST in bytecode — OSR at a non-existent jump target
-    MBasicBlock *FailBB =
-        getOrCreateExceptionSetBB(ErrorCode::EVMBadJumpDestination);
-    createInstruction<BrInstruction>(true, Ctx, FailBB);
-    addSuccessor(FailBB);
-  }
-
-  setInsertBlock(SavedBB);
-}
-
 void EVMMirBuilder::finalizeEVMBase() {
-  finalizeOSR();
   const auto &ExceptionSetBBs = CurFunc->getExceptionSetBBs();
 
   VariableIdx ExceptionIDIdx =

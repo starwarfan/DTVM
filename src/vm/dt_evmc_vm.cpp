@@ -265,12 +265,12 @@ enum evmc_set_option_result set_option(evmc_vm *VMInstance, const char *Name,
       return EVMC_SET_OPTION_INVALID_VALUE;
     }
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
-  } else if (std::strcmp(Name, "lazy") == 0) {
+  } else if (std::strcmp(Name, "background_jit") == 0) {
     if (std::strcmp(Value, "true") == 0) {
-      VM->Config.EnableMultipassLazy = true;
+      VM->Config.EnableBackgroundJIT = true;
       return EVMC_SET_OPTION_SUCCESS;
     } else if (std::strcmp(Value, "false") == 0) {
-      VM->Config.EnableMultipassLazy = false;
+      VM->Config.EnableBackgroundJIT = false;
       return EVMC_SET_OPTION_SUCCESS;
     }
     return EVMC_SET_OPTION_INVALID_VALUE;
@@ -614,12 +614,13 @@ DTVM::DTVM()
   }
 
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
-  if (const char *Lazy = std::getenv("DTVM_EVM_LAZY_JIT"); Lazy != nullptr) {
-    bool ParsedLazy = false;
-    if (parseBoolEnvValue(Lazy, ParsedLazy)) {
-      Config.EnableMultipassLazy = ParsedLazy;
+  if (const char *BgJIT = std::getenv("DTVM_EVM_BACKGROUND_JIT");
+      BgJIT != nullptr) {
+    bool ParsedBgJIT = false;
+    if (parseBoolEnvValue(BgJIT, ParsedBgJIT)) {
+      Config.EnableBackgroundJIT = ParsedBgJIT;
     } else {
-      ZEN_LOG_WARN("ignore invalid DTVM_EVM_LAZY_JIT=%s", Lazy);
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_BACKGROUND_JIT=%s", BgJIT);
     }
   }
 #endif
