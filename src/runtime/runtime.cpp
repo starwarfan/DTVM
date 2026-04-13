@@ -695,14 +695,20 @@ void Runtime::callEVMInInterpMode(EVMInstance &Inst, evmc_message &Msg,
 
     evm::BaseInterpreter Interpreter(*TLCtx);
     TLCtx->allocTopFrame(&Msg);
-    Interpreter.interpret();
+    {
+      evm::EVMResource::ClearGuard ClearTls;
+      Interpreter.interpret();
+    }
     Result = std::move(const_cast<evmc::Result &>(TLCtx->getExeResult()));
   } else {
     // Nested call: use a stack-local context to avoid corrupting the outer one
     evm::InterpreterExecContext Ctx(&Inst);
     evm::BaseInterpreter Interpreter(Ctx);
     Ctx.allocTopFrame(&Msg);
-    Interpreter.interpret();
+    {
+      evm::EVMResource::ClearGuard ClearTls;
+      Interpreter.interpret();
+    }
     Result = std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
   }
 }

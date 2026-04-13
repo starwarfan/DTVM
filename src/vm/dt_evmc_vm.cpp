@@ -583,7 +583,10 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   auto &Ctx = *CtxPtr;
   zen::evm::BaseInterpreter Interpreter(Ctx);
   Ctx.allocTopFrame(&MsgWithCode);
-  Interpreter.interpret();
+  {
+    zen::evm::EVMResource::ClearGuard ClearTls;
+    Interpreter.interpret();
+  }
 
   evmc::Result Result =
       std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
