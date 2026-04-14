@@ -20,8 +20,27 @@ void trimString(std::string &Str) {
   Str.erase(Str.find_last_not_of(" \n\r\t") + 1);
 }
 
+/// Pad an odd-length hex string to even length by inserting a leading '0'
+/// after the optional 0x prefix. Handles both prefixed ("0x1" -> "0x01")
+/// and non-prefixed ("1" -> "01") inputs.
+static std::string padHexToEvenLength(const std::string &HexStr) {
+  if (HexStr.size() >= 2 && (HexStr[0] == '0') &&
+      (HexStr[1] == 'x' || HexStr[1] == 'X')) {
+    std::string Stripped = HexStr.substr(2);
+    if (Stripped.length() % 2 != 0) {
+      return "0x0" + Stripped;
+    }
+  } else if (!HexStr.empty() && HexStr.length() % 2 != 0) {
+    return "0" + HexStr;
+  }
+  return HexStr;
+}
+
 std::optional<std::vector<uint8_t>> fromHex(std::string_view HexStr) {
-  if (auto Data = evmc::from_hex(HexStr)) {
+  // Handle odd-length hex strings (e.g. "0x1" -> "0x01", "1" -> "01")
+  // which are rejected by evmc::from_hex
+  std::string Padded = padHexToEvenLength(std::string(HexStr));
+  if (auto Data = evmc::from_hex(Padded)) {
     return std::vector<uint8_t>(Data->begin(), Data->end());
   } else {
     return std::nullopt;
@@ -73,7 +92,8 @@ evmc::address parseAddress(const std::string &HexAddr) {
 
 evmc::bytes32 parseBytes32(const std::string &HexStr) {
   evmc::bytes32 Result{};
-  if (auto Data = evmc::from_hex(HexStr)) {
+  std::string Padded = padHexToEvenLength(HexStr);
+  if (auto Data = evmc::from_hex(Padded)) {
     if (Data->size() <= 32) {
       std::memcpy(Result.bytes + (32 - Data->size()), Data->data(),
                   Data->size());
@@ -87,7 +107,8 @@ evmc::bytes32 parseBytes32(const std::string &HexStr) {
 
 evmc::uint256be parseUint256(const std::string &HexStr) {
   evmc::uint256be Result{};
-  if (auto Data = evmc::from_hex(HexStr)) {
+  std::string Padded = padHexToEvenLength(HexStr);
+  if (auto Data = evmc::from_hex(Padded)) {
     if (Data->size() <= 32) {
       std::memcpy(Result.bytes + (32 - Data->size()), Data->data(),
                   Data->size());
