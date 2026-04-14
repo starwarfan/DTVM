@@ -384,6 +384,11 @@ int main(int argc, char *argv[]) {
                                .ContractAddress = ContractAddress};
     evmc_message Msg = createEvmMessage(MockedHost, MsgConfig, Bytecode);
 
+    // EIP-2929/EIP-3651: Pre-warm transaction-level accounts.
+    zen::utils::prewarmTransactionAccounts(
+        MockedHost, EvmRevision, Msg.sender, Msg.recipient,
+        MockedHost.tx_context.block_coinbase);
+
     RT->callEVMMain(*Inst, Msg, ExeResult);
 
     if (EVMC_CREATE == MsgKind && ExeResult.status_code == EVMC_SUCCESS) {
