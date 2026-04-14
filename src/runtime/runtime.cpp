@@ -780,14 +780,17 @@ void Runtime::callWasmFunctionInJITMode(Instance &Inst, uint32_t FuncIdx,
       GenericFunctionPointer(IsImport ? Func->CodePtr : Func->JITCodePtr);
 
 #ifdef ZEN_ENABLE_CPU_EXCEPTION
-  jmp_buf JmpBuf;
+  sigjmp_buf JmpBuf;
   common::traphandler::CallThreadState TLS(&Inst, &JmpBuf,
                                            __builtin_frame_address(0), nullptr);
 
+  // siglongjmp from signal handlers skips C++ unwinding on intermediate frames.
+  // Keep this wrapper minimal and avoid introducing non-trivial RAII objects
+  // between sigsetjmp() and callNativeGeneral().
   // longjmp with asan(in gcc-9) not works well, it affects the asan stack
   // malloc. so use wrapper func to recover the stack
   auto CallWasmFnWrapper = [&]() {
-    int JmpSignum = ::setjmp(JmpBuf);
+    int JmpSignum = ::sigsetjmp(JmpBuf, 1);
     if (JmpSignum == 0) {
       TLS.restartHandler();
 
@@ -898,14 +901,17 @@ void Runtime::callEVMInJITMode(EVMInstance &Inst, evmc_message &Msg,
   };
 
 #ifdef ZEN_ENABLE_CPU_EXCEPTION
-  jmp_buf JmpBuf;
+  sigjmp_buf JmpBuf;
   common::evm_traphandler::EVMCallThreadState TLS(&Inst, &JmpBuf,
                                                   __builtin_frame_address(0));
 
+  // siglongjmp from signal handlers skips C++ unwinding on intermediate frames.
+  // Keep this wrapper minimal and avoid introducing non-trivial RAII objects
+  // between sigsetjmp() and callNativeGeneral().
   // longjmp with asan(in gcc-9) not works well, it affects the asan stack
   // malloc. so use wrapper func to recover the stack
   auto CallEVMFnWrapper = [&]() {
-    int JmpSignum = ::setjmp(JmpBuf);
+    int JmpSignum = ::sigsetjmp(JmpBuf, 1);
     if (JmpSignum == 0) {
       TLS.restartHandler();
 #endif // ZEN_ENABLE_CPU_EXCEPTION

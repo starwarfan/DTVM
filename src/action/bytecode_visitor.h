@@ -135,19 +135,19 @@ private:
         break;
 
       case Opcode::BR:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleBranch(U32);
         Ip = skipCurrentBlock(Ip, IpEnd);
         CurBlock.setReachable(false);
         break;
 
       case Opcode::BR_IF:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleBranchIf(U32);
         break;
 
       case Opcode::BR_TABLE:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         Ip = handleBranchTable(Ip, IpEnd, U32);
         Ip = skipCurrentBlock(Ip, IpEnd);
         CurBlock.setReachable(false);
@@ -160,7 +160,7 @@ private:
         break;
 
       case Opcode::CALL: {
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         if (U32 == CurMod->getGasFuncIdx()) {
           handleGasCall();
           break;
@@ -180,7 +180,7 @@ private:
       }
 
       case Opcode::CALL_INDIRECT:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         Ip++; // Skip table index(0)
         handleCallIndirect(U32, 0);
         break;
@@ -196,119 +196,119 @@ private:
         break;
 
       case Opcode::GET_LOCAL:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleGetLocal(U32);
         break;
 
       case Opcode::SET_LOCAL:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleSetLocal(U32);
         break;
 
       case Opcode::TEE_LOCAL:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleTeeLocal(U32);
         break;
 
       case Opcode::GET_GLOBAL:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleGetGlobal(U32);
         break;
 
       case Opcode::SET_GLOBAL:
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleSetGlobal(U32);
         break;
 
       case Opcode::I32_LOAD:
-        Ip = handleLoad<WASMType::I32, WASMType::I32, false>(Ip);
+        Ip = handleLoad<WASMType::I32, WASMType::I32, false>(Ip, IpEnd);
         break;
       case Opcode::I32_LOAD8_S:
-        Ip = handleLoad<WASMType::I32, WASMType::I8, true>(Ip);
+        Ip = handleLoad<WASMType::I32, WASMType::I8, true>(Ip, IpEnd);
         break;
       case Opcode::I32_LOAD8_U:
-        Ip = handleLoad<WASMType::I32, WASMType::I8, false>(Ip);
+        Ip = handleLoad<WASMType::I32, WASMType::I8, false>(Ip, IpEnd);
         break;
       case Opcode::I32_LOAD16_S:
-        Ip = handleLoad<WASMType::I32, WASMType::I16, true>(Ip);
+        Ip = handleLoad<WASMType::I32, WASMType::I16, true>(Ip, IpEnd);
         break;
       case Opcode::I32_LOAD16_U:
-        Ip = handleLoad<WASMType::I32, WASMType::I16, false>(Ip);
+        Ip = handleLoad<WASMType::I32, WASMType::I16, false>(Ip, IpEnd);
         break;
       case Opcode::I64_LOAD:
-        Ip = handleLoad<WASMType::I64, WASMType::I64, false>(Ip);
+        Ip = handleLoad<WASMType::I64, WASMType::I64, false>(Ip, IpEnd);
         break;
       case Opcode::I64_LOAD8_S:
-        Ip = handleLoad<WASMType::I64, WASMType::I8, true>(Ip);
+        Ip = handleLoad<WASMType::I64, WASMType::I8, true>(Ip, IpEnd);
         break;
       case Opcode::I64_LOAD8_U:
-        Ip = handleLoad<WASMType::I64, WASMType::I8, false>(Ip);
+        Ip = handleLoad<WASMType::I64, WASMType::I8, false>(Ip, IpEnd);
         break;
       case Opcode::I64_LOAD16_S:
-        Ip = handleLoad<WASMType::I64, WASMType::I16, true>(Ip);
+        Ip = handleLoad<WASMType::I64, WASMType::I16, true>(Ip, IpEnd);
         break;
       case Opcode::I64_LOAD16_U:
-        Ip = handleLoad<WASMType::I64, WASMType::I16, false>(Ip);
+        Ip = handleLoad<WASMType::I64, WASMType::I16, false>(Ip, IpEnd);
         break;
       case Opcode::I64_LOAD32_S:
-        Ip = handleLoad<WASMType::I64, WASMType::I32, true>(Ip);
+        Ip = handleLoad<WASMType::I64, WASMType::I32, true>(Ip, IpEnd);
         break;
       case Opcode::I64_LOAD32_U:
-        Ip = handleLoad<WASMType::I64, WASMType::I32, false>(Ip);
+        Ip = handleLoad<WASMType::I64, WASMType::I32, false>(Ip, IpEnd);
         break;
       case Opcode::F32_LOAD:
-        Ip = handleLoad<WASMType::F32, WASMType::F32, false>(Ip);
+        Ip = handleLoad<WASMType::F32, WASMType::F32, false>(Ip, IpEnd);
         break;
       case Opcode::F64_LOAD:
-        Ip = handleLoad<WASMType::F64, WASMType::F64, false>(Ip);
+        Ip = handleLoad<WASMType::F64, WASMType::F64, false>(Ip, IpEnd);
         break;
 
       case Opcode::I32_STORE:
-        Ip = handleStore<WASMType::I32, WASMType::I32>(Ip);
+        Ip = handleStore<WASMType::I32, WASMType::I32>(Ip, IpEnd);
         break;
       case Opcode::I32_STORE8:
-        Ip = handleStore<WASMType::I32, WASMType::I8>(Ip);
+        Ip = handleStore<WASMType::I32, WASMType::I8>(Ip, IpEnd);
         break;
       case Opcode::I32_STORE16:
-        Ip = handleStore<WASMType::I32, WASMType::I16>(Ip);
+        Ip = handleStore<WASMType::I32, WASMType::I16>(Ip, IpEnd);
         break;
       case Opcode::I64_STORE:
-        Ip = handleStore<WASMType::I64, WASMType::I64>(Ip);
+        Ip = handleStore<WASMType::I64, WASMType::I64>(Ip, IpEnd);
         break;
       case Opcode::I64_STORE8:
-        Ip = handleStore<WASMType::I64, WASMType::I8>(Ip);
+        Ip = handleStore<WASMType::I64, WASMType::I8>(Ip, IpEnd);
         break;
       case Opcode::I64_STORE16:
-        Ip = handleStore<WASMType::I64, WASMType::I16>(Ip);
+        Ip = handleStore<WASMType::I64, WASMType::I16>(Ip, IpEnd);
         break;
       case Opcode::I64_STORE32:
-        Ip = handleStore<WASMType::I64, WASMType::I32>(Ip);
+        Ip = handleStore<WASMType::I64, WASMType::I32>(Ip, IpEnd);
         break;
       case Opcode::F32_STORE:
-        Ip = handleStore<WASMType::F32, WASMType::F32>(Ip);
+        Ip = handleStore<WASMType::F32, WASMType::F32>(Ip, IpEnd);
         break;
       case Opcode::F64_STORE:
-        Ip = handleStore<WASMType::F64, WASMType::F64>(Ip);
+        Ip = handleStore<WASMType::F64, WASMType::F64>(Ip, IpEnd);
         break;
 
       case Opcode::MEMORY_SIZE:
         // Skip the memory index(0)
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleMemorySize();
         break;
 
       case Opcode::MEMORY_GROW:
         // Skip the memory index(0)
-        Ip = readSafeLEBNumber(Ip, U32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, U32);
         handleMemoryGrow();
         break;
 
       case Opcode::I32_CONST:
-        Ip = readSafeLEBNumber(Ip, I32);
+        Ip = readSafeLEBNumber(Ip, IpEnd, I32);
         handleConst<WASMType::I32>(I32);
         break;
       case Opcode::I64_CONST:
-        Ip = readSafeLEBNumber(Ip, I64);
+        Ip = readSafeLEBNumber(Ip, IpEnd, I64);
         handleConst<WASMType::I64>(I64);
         break;
       case Opcode::F32_CONST:
@@ -820,7 +820,7 @@ private:
     WASMType Type = WASMType::VOID;
     for (uint32_t I = 0; I < Count + 1; ++I) {
       uint32_t TargetLevel;
-      Ip = readSafeLEBNumber(Ip, TargetLevel);
+      Ip = readSafeLEBNumber(Ip, End, TargetLevel);
       if (Ip >= End) {
         break;
       }
@@ -943,11 +943,11 @@ private:
   // ==================== Memory Instruction Handlers ====================
 
   template <WASMType DestType, WASMType SrcType, bool Sext>
-  const uint8_t *handleLoad(const uint8_t *Ip) {
+  const uint8_t *handleLoad(const uint8_t *Ip, const uint8_t *End) {
     uint32_t Align;
     uint32_t Offset;
-    Ip = readSafeLEBNumber(Ip, Align);
-    Ip = readSafeLEBNumber(Ip, Offset);
+    Ip = readSafeLEBNumber(Ip, End, Align);
+    Ip = readSafeLEBNumber(Ip, End, Offset);
     Operand Base = pop();
     Operand Result = Builder.template handleLoad<DestType, SrcType, Sext>(
         Base, Offset, Align);
@@ -956,11 +956,11 @@ private:
   }
 
   template <WASMType SrcType, WASMType DestType>
-  const uint8_t *handleStore(const uint8_t *Ip) {
+  const uint8_t *handleStore(const uint8_t *Ip, const uint8_t *End) {
     uint32_t Align;
     uint32_t Offset;
-    Ip = readSafeLEBNumber(Ip, Align);
-    Ip = readSafeLEBNumber(Ip, Offset);
+    Ip = readSafeLEBNumber(Ip, End, Align);
+    Ip = readSafeLEBNumber(Ip, End, Offset);
     Operand Value = pop();
     Operand Base = pop();
     ZEN_ASSERT(Value.getType() == SrcType);
@@ -1015,7 +1015,7 @@ private:
     }
 
     case Opcode::BR_IF: {
-      Ip = readSafeLEBNumber(Ip + 1, U32Val);
+      Ip = readSafeLEBNumber(Ip + 1, End, U32Val);
       // bounds check
       if (Ip < End) {
         const CtrlBlockInfo &Info = Builder.getBlockInfo(U32Val);
