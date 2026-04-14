@@ -336,50 +336,51 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   EVMModule *Mod = nullptr;
 
   // L1: Address-based LRU cache lookup
-  CodeAddrRevKey AddrKey{Msg->code_address, Rev};
-  auto It = VM->AddrCache.find(AddrKey);
-  if (It != VM->AddrCache.end() &&
-      validateCodeMatch(Code, CodeSize, It->second.first)) {
-    Mod = It->second.first;
-    // LRU touch: move to front (most recently used)
-    VM->LRUOrder.splice(VM->LRUOrder.begin(), VM->LRUOrder, It->second.second);
-  } else {
-    // Cold path: full module load
-    // If validation failed for an existing entry, evict the stale module
-    if (It != VM->AddrCache.end()) {
-      EVMModule *OldMod = It->second.first;
-      if (VM->L0Mod == OldMod && Msg->depth == 0)
-        VM->L0Mod = nullptr;
-      VM->RT->unloadEVMModule(OldMod);
-      VM->LRUOrder.erase(It->second.second);
-      VM->AddrCache.erase(It);
-    }
+  // CodeAddrRevKey AddrKey{Msg->code_address, Rev};
+  // auto It = VM->AddrCache.find(AddrKey);
+  // if (It != VM->AddrCache.end() &&
+  //     validateCodeMatch(Code, CodeSize, It->second.first)) {
+  //   Mod = It->second.first;
+  //   // LRU touch: move to front (most recently used)
+  //   VM->LRUOrder.splice(VM->LRUOrder.begin(), VM->LRUOrder,
+  //   It->second.second);
+  // } else {
+  //   // Cold path: full module load
+  //   // If validation failed for an existing entry, evict the stale module
+  //   if (It != VM->AddrCache.end()) {
+  //     EVMModule *OldMod = It->second.first;
+  //     if (VM->L0Mod == OldMod && Msg->depth == 0)
+  //       VM->L0Mod = nullptr;
+  //     VM->RT->unloadEVMModule(OldMod);
+  //     VM->LRUOrder.erase(It->second.second);
+  //     VM->AddrCache.erase(It);
+  //   }
 
-    // LRU eviction: if cache is at capacity, evict least recently used
-    while (VM->AddrCache.size() >= MAX_MODULE_CACHE_SIZE &&
-           !VM->LRUOrder.empty()) {
-      auto &VictimKey = VM->LRUOrder.back();
-      auto VictimIt = VM->AddrCache.find(VictimKey);
-      if (VictimIt != VM->AddrCache.end()) {
-        EVMModule *VictimMod = VictimIt->second.first;
-        if (VM->isModuleInUse(VictimMod))
-          break; // never evict a module referenced by an active instance
-        if (VM->L0Mod == VictimMod)
-          VM->L0Mod = nullptr;
-        VM->RT->unloadEVMModule(VictimMod);
-        VM->AddrCache.erase(VictimIt);
-      }
-      VM->LRUOrder.pop_back();
-    }
+  //   // LRU eviction: if cache is at capacity, evict least recently used
+  //   while (VM->AddrCache.size() >= MAX_MODULE_CACHE_SIZE &&
+  //          !VM->LRUOrder.empty()) {
+  //     auto &VictimKey = VM->LRUOrder.back();
+  //     auto VictimIt = VM->AddrCache.find(VictimKey);
+  //     if (VictimIt != VM->AddrCache.end()) {
+  //       EVMModule *VictimMod = VictimIt->second.first;
+  //       if (VM->isModuleInUse(VictimMod))
+  //         break; // never evict a module referenced by an active instance
+  //       if (VM->L0Mod == VictimMod)
+  //         VM->L0Mod = nullptr;
+  //       VM->RT->unloadEVMModule(VictimMod);
+  //       VM->AddrCache.erase(VictimIt);
+  //     }
+  //     VM->LRUOrder.pop_back();
+  //   }
 
-    std::string ModName = "mod_" + std::to_string(VM->ModCounter++);
-    auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
-    if (!ModRet)
-      return nullptr;
-    Mod = *ModRet;
-    VM->LRUOrder.push_front(AddrKey);
-    VM->AddrCache[AddrKey] = {Mod, VM->LRUOrder.begin()};
-  }
+  std::string ModName = "mod_" + std::to_string(VM->ModCounter++);
+  auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
+  if (!ModRet)
+    return nullptr;
+  Mod = *ModRet;
+  // VM->LRUOrder.push_front(AddrKey);
+  // VM->AddrCache[AddrKey] = {Mod, VM->LRUOrder.begin()};
+  // }
 
   // Update L0 cache members. Even though L0 lookup is disabled, we maintain
   // these state variables for two reasons:
@@ -571,6 +572,10 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
   auto *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
   if (!TheInst) {
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
+  }
+
+  if (std::getenv("JUST_COMPILE")) {
+    return evmc_make_result(EVMC_SUCCESS, Msg->gas, 0, nullptr, 0);
   }
 
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
