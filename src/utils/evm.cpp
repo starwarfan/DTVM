@@ -450,6 +450,44 @@ bool loadState(evmc::MockedHost &Host, const std::string &FilePath) {
     }
   }
 
+  // Parse and pre-warm EIP-2930 access list if present.
+  // Warm addresses cost 100 gas instead of cold 2600, warm storage slots
+  // cost 100 gas instead of cold 2100.
+  if (Doc.HasMember("access_list") && Doc["access_list"].IsArray()) {
+    for (const auto &Entry : Doc["access_list"].GetArray()) {
+      if (!Entry.IsObject() || !Entry.HasMember("address") ||
+          !Entry["address"].IsString()) {
+        continue;
+      }
+      evmc::address Address;
+      try {
+        Address = zen::utils::parseAddress(Entry["address"].GetString());
+      } catch (...) {
+        continue;
+      }
+      Host.access_account(Address);
+
+      if (!Entry.HasMember("storage_keys") ||
+          !Entry["storage_keys"].IsArray()) {
+        continue;
+      }
+      // EIP-2930 requires access-list storage keys to be warm even when the
+      // account is not yet present in the initial host state (e.g. when the
+      // contract is created later in the same transaction). Use the host
+      // access_storage API so the account entry is materialized automatically.
+      for (const auto &KeyVal : Entry["storage_keys"].GetArray()) {
+        if (!KeyVal.IsString()) {
+          continue;
+        }
+        try {
+          evmc::bytes32 Key = zen::utils::parseBytes32(KeyVal.GetString());
+          Host.access_storage(Address, Key);
+        } catch (...) {
+          continue;
+        }
+      }
+    }
+  }
   return true;
 }
 
