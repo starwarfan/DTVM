@@ -168,6 +168,8 @@ GTEST_API_ int main(int argc, char *argv[]) {
       ->excludes(DMMOption);
   CLIParser.add_flag("--enable-multipass-lazy", Config.EnableMultipassLazy,
                      "Enable multipass lazy mode(on request compile)");
+  CLIParser.add_flag("--enable-background-jit", Config.EnableBackgroundJIT,
+                     "Enable EVM background JIT mode");
 #endif // ZEN_ENABLE_MULTIPASS_JIT
 
   CLI11_PARSE(CLIParser, argc, argv);

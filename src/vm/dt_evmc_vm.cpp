@@ -265,12 +265,12 @@ enum evmc_set_option_result set_option(evmc_vm *VMInstance, const char *Name,
       return EVMC_SET_OPTION_INVALID_VALUE;
     }
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
-  } else if (std::strcmp(Name, "lazy") == 0) {
+  } else if (std::strcmp(Name, "background_jit") == 0) {
     if (std::strcmp(Value, "true") == 0) {
-      VM->Config.EnableMultipassLazy = true;
+      VM->Config.EnableBackgroundJIT = true;
       return EVMC_SET_OPTION_SUCCESS;
     } else if (std::strcmp(Value, "false") == 0) {
-      VM->Config.EnableMultipassLazy = false;
+      VM->Config.EnableBackgroundJIT = false;
       return EVMC_SET_OPTION_SUCCESS;
     }
     return EVMC_SET_OPTION_INVALID_VALUE;
@@ -336,50 +336,51 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   EVMModule *Mod = nullptr;
 
   // L1: Address-based LRU cache lookup
-  CodeAddrRevKey AddrKey{Msg->code_address, Rev};
-  auto It = VM->AddrCache.find(AddrKey);
-  if (It != VM->AddrCache.end() &&
-      validateCodeMatch(Code, CodeSize, It->second.first)) {
-    Mod = It->second.first;
-    // LRU touch: move to front (most recently used)
-    VM->LRUOrder.splice(VM->LRUOrder.begin(), VM->LRUOrder, It->second.second);
-  } else {
-    // Cold path: full module load
-    // If validation failed for an existing entry, evict the stale module
-    if (It != VM->AddrCache.end()) {
-      EVMModule *OldMod = It->second.first;
-      if (VM->L0Mod == OldMod && Msg->depth == 0)
-        VM->L0Mod = nullptr;
-      VM->RT->unloadEVMModule(OldMod);
-      VM->LRUOrder.erase(It->second.second);
-      VM->AddrCache.erase(It);
-    }
+  // CodeAddrRevKey AddrKey{Msg->code_address, Rev};
+  // auto It = VM->AddrCache.find(AddrKey);
+  // if (It != VM->AddrCache.end() &&
+  //     validateCodeMatch(Code, CodeSize, It->second.first)) {
+  //   Mod = It->second.first;
+  //   // LRU touch: move to front (most recently used)
+  //   VM->LRUOrder.splice(VM->LRUOrder.begin(), VM->LRUOrder,
+  //   It->second.second);
+  // } else {
+  //   // Cold path: full module load
+  //   // If validation failed for an existing entry, evict the stale module
+  //   if (It != VM->AddrCache.end()) {
+  //     EVMModule *OldMod = It->second.first;
+  //     if (VM->L0Mod == OldMod && Msg->depth == 0)
+  //       VM->L0Mod = nullptr;
+  //     VM->RT->unloadEVMModule(OldMod);
+  //     VM->LRUOrder.erase(It->second.second);
+  //     VM->AddrCache.erase(It);
+  //   }
 
-    // LRU eviction: if cache is at capacity, evict least recently used
-    while (VM->AddrCache.size() >= MAX_MODULE_CACHE_SIZE &&
-           !VM->LRUOrder.empty()) {
-      auto &VictimKey = VM->LRUOrder.back();
-      auto VictimIt = VM->AddrCache.find(VictimKey);
-      if (VictimIt != VM->AddrCache.end()) {
-        EVMModule *VictimMod = VictimIt->second.first;
-        if (VM->isModuleInUse(VictimMod))
-          break; // never evict a module referenced by an active instance
-        if (VM->L0Mod == VictimMod)
-          VM->L0Mod = nullptr;
-        VM->RT->unloadEVMModule(VictimMod);
-        VM->AddrCache.erase(VictimIt);
-      }
-      VM->LRUOrder.pop_back();
-    }
+  //   // LRU eviction: if cache is at capacity, evict least recently used
+  //   while (VM->AddrCache.size() >= MAX_MODULE_CACHE_SIZE &&
+  //          !VM->LRUOrder.empty()) {
+  //     auto &VictimKey = VM->LRUOrder.back();
+  //     auto VictimIt = VM->AddrCache.find(VictimKey);
+  //     if (VictimIt != VM->AddrCache.end()) {
+  //       EVMModule *VictimMod = VictimIt->second.first;
+  //       if (VM->isModuleInUse(VictimMod))
+  //         break; // never evict a module referenced by an active instance
+  //       if (VM->L0Mod == VictimMod)
+  //         VM->L0Mod = nullptr;
+  //       VM->RT->unloadEVMModule(VictimMod);
+  //       VM->AddrCache.erase(VictimIt);
+  //     }
+  //     VM->LRUOrder.pop_back();
+  //   }
 
-    std::string ModName = "mod_" + std::to_string(VM->ModCounter++);
-    auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
-    if (!ModRet)
-      return nullptr;
-    Mod = *ModRet;
-    VM->LRUOrder.push_front(AddrKey);
-    VM->AddrCache[AddrKey] = {Mod, VM->LRUOrder.begin()};
-  }
+  std::string ModName = "mod_" + std::to_string(VM->ModCounter++);
+  auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
+  if (!ModRet)
+    return nullptr;
+  Mod = *ModRet;
+  // VM->LRUOrder.push_front(AddrKey);
+  // VM->AddrCache[AddrKey] = {Mod, VM->LRUOrder.begin()};
+  // }
 
   // Update L0 cache members. Even though L0 lookup is disabled, we maintain
   // these state variables for two reasons:
@@ -573,7 +574,54 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
-  // Execute via callEVMMain (handles both JIT and interpreter fallback)
+  if (std::getenv("JUST_COMPILE")) {
+    return evmc_make_result(EVMC_SUCCESS, Msg->gas, 0, nullptr, 0);
+  }
+
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+  // Background JIT optimization: when JIT code is not yet ready, use the
+  // interpreter fast path (cached context, no callEVMMain overhead) instead
+  // of falling through to callEVMMain which has higher per-call overhead.
+  if (VM->Config.EnableBackgroundJIT && !Mod->getJITCode()) {
+    (void)Mod->getBytecodeCache();
+
+    evmc_message MsgWithCode = *Msg;
+    MsgWithCode.code = reinterpret_cast<uint8_t *>(Mod->Code);
+    MsgWithCode.code_size = Mod->CodeSize;
+    TheInst->setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
+    TheInst->pushMessage(&MsgWithCode);
+
+    const bool ReuseCachedInstance = !IsTransientMod && Msg->depth == 0;
+
+    std::unique_ptr<zen::evm::InterpreterExecContext> TempCtx;
+    zen::evm::InterpreterExecContext *CtxPtr = nullptr;
+    if (!ReuseCachedInstance) {
+      TempCtx = std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
+      CtxPtr = TempCtx.get();
+    } else {
+      if (!VM->CachedCtx) {
+        VM->CachedCtx =
+            std::make_unique<zen::evm::InterpreterExecContext>(TheInst);
+      } else {
+        VM->CachedCtx->resetForNewCall(TheInst);
+      }
+      CtxPtr = VM->CachedCtx.get();
+    }
+
+    auto &Ctx = *CtxPtr;
+    zen::evm::BaseInterpreter Interpreter(Ctx);
+    Ctx.allocTopFrame(&MsgWithCode);
+    Interpreter.interpret();
+
+    evmc::Result Result =
+        std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
+    Result.gas_left = TheInst->getGas();
+
+    return Result.release_raw();
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT
+
+  // Execute via callEVMMain (handles JIT execution)
   evmc_message Message = *Msg;
   evmc::Result Result;
   VM->RT->callEVMMain(*TheInst, Message, Result);
@@ -614,12 +662,13 @@ DTVM::DTVM()
   }
 
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
-  if (const char *Lazy = std::getenv("DTVM_EVM_LAZY_JIT"); Lazy != nullptr) {
-    bool ParsedLazy = false;
-    if (parseBoolEnvValue(Lazy, ParsedLazy)) {
-      Config.EnableMultipassLazy = ParsedLazy;
+  if (const char *BgJIT = std::getenv("DTVM_EVM_BACKGROUND_JIT");
+      BgJIT != nullptr) {
+    bool ParsedBgJIT = false;
+    if (parseBoolEnvValue(BgJIT, ParsedBgJIT)) {
+      Config.EnableBackgroundJIT = ParsedBgJIT;
     } else {
-      ZEN_LOG_WARN("ignore invalid DTVM_EVM_LAZY_JIT=%s", Lazy);
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_BACKGROUND_JIT=%s", BgJIT);
     }
   }
 #endif

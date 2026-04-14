@@ -73,7 +73,7 @@ EVMModuleUniquePtr EVMModule::newEVMModule(Runtime &RT,
 
   if (RT.getConfig().Mode != common::RunMode::InterpMode) {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
-    if (RT.getConfig().EnableMultipassLazy) {
+    if (RT.getConfig().EnableBackgroundJIT) {
       // Eagerly init bytecode cache (needed by both interpreter and JIT)
       (void)Mod->getBytecodeCache();
       EVMModule *RawMod = Mod.get();

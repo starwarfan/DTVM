@@ -692,28 +692,18 @@ void Runtime::callEVMMainOnPhysStack(EVMInstance &Inst, evmc_message &Msg,
   Inst.setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
   Inst.pushMessage(&MsgWithCode);
 
-  bool UseInterpreter = (getConfig().Mode == RunMode::InterpMode);
+  bool UseJIT = false;
 #ifdef ZEN_ENABLE_JIT
-  if (!UseInterpreter && !Inst.getModule()->getJITCode()) {
-    UseInterpreter = true;
-  }
+  UseJIT = (getConfig().Mode != RunMode::InterpMode) &&
+           Inst.getModule()->getJITCode();
 #endif
 
-  if (UseInterpreter) {
-    callEVMInInterpMode(Inst, MsgWithCode, Result);
-#ifdef ZEN_ENABLE_JIT
-    // OSR: interpreter promoted to JIT mid-execution
-    if (Inst.getOSRPC() != 0) {
-      callEVMInJITMode(Inst, MsgWithCode, Result);
-      Inst.setOSRPC(0);
-    }
-#endif
-  } else {
+  if (UseJIT) {
 #ifdef ZEN_ENABLE_JIT
     callEVMInJITMode(Inst, MsgWithCode, Result);
-#else
-    ZEN_UNREACHABLE();
 #endif
+  } else {
+    callEVMInInterpMode(Inst, MsgWithCode, Result);
   }
   Result.gas_left = Inst.getGas();
 }

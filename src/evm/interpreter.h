@@ -123,12 +123,6 @@ public:
 
   // Fallback support: restore execution state from EVMInstance
   void restoreStateFromInstance(uint64_t startPC);
-
-  // OSR support: save execution state to EVMInstance for JIT promotion
-  void saveStateToInstance(uint64_t TargetPC);
-
-  // Set when OSR promotion happened — caller should check and use JIT result
-  bool OSRPromoted = false;
 };
 
 class BaseInterpreter {
