@@ -77,7 +77,17 @@ public:
 
   void restartHandler() { Handling = true; }
 
-  void jmpToMarked(int Signum) { longjmp(*JmpBuf, Signum); }
+  void jmpToMarked(int Signum) {
+    // Unblock the signal before longjmp, since we no longer use SA_NODEFER.
+    // Without this, the signal remains blocked after longjmp and subsequent
+    // traps of the same signal type would be silently ignored.
+    sigset_t SigSet;
+    sigemptyset(&SigSet);
+    sigaddset(&SigSet, Signum);
+    int UnblockResult = sigprocmask(SIG_UNBLOCK, &SigSet, nullptr);
+    ZEN_ASSERT(UnblockResult == 0);
+    longjmp(*JmpBuf, Signum);
+  }
 
   void setTrapFrameAddr(void *Addr, void *PC, void *FaultingAddress,
                         uint32_t NumIgnoredFrames) {
