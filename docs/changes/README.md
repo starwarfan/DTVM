@@ -45,6 +45,11 @@ Typical triggers:
 
 ## Current Proposals
 
+| Date | Name | Status | Tier | Description |
+|------|------|--------|------|-------------|
+| 2026-03-10 | [evm-stack-ssa-lifting](2026-03-10-evm-stack-ssa-lifting/README.md) | Implemented | Full | True-SSA stack lifting for EVM multipass JIT |
+| 2026-04-14 | [handlecompare-bounds-check](2026-04-14-handlecompare-bounds-check/README.md) | Implemented | Light | Add bounds check before macro-fusion read in handleCompare |
+
 Each active proposal lives in its own subdirectory. Browse `docs/changes/*/README.md`
 to see all current proposals, or use:
 
