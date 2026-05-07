@@ -102,42 +102,6 @@ inline void triggerStaticModeViolation(zen::runtime::EVMInstance *Instance) {
   zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT(
       Instance, zen::common::ErrorCode::EVMStaticModeViolation);
 }
-
-constexpr uint8_t DelegationMagicBytes[] = {0xef, 0x01, 0x00};
-
-bool resolveDelegatedCallCodeAddress(zen::runtime::EVMInstance *Instance,
-                                     evmc::address TargetAddr,
-                                     evmc::address &CodeAddr) {
-  CodeAddr = TargetAddr;
-  if (Instance->getRevision() < EVMC_PRAGUE) {
-    return true;
-  }
-
-  const zen::runtime::EVMModule *Module = Instance->getModule();
-  ZEN_ASSERT(Module && Module->Host);
-  uint8_t Designation[sizeof(DelegationMagicBytes) + sizeof(evmc::address)] =
-      {};
-  const size_t Copied =
-      Module->Host->copy_code(TargetAddr, 0, Designation, sizeof(Designation));
-  if (Copied < sizeof(DelegationMagicBytes) ||
-      std::memcmp(Designation, DelegationMagicBytes,
-                  sizeof(DelegationMagicBytes)) != 0) {
-    return true;
-  }
-
-  if (Copied != sizeof(Designation)) {
-    return true;
-  }
-
-  std::memcpy(CodeAddr.bytes, Designation + sizeof(DelegationMagicBytes),
-              sizeof(CodeAddr.bytes));
-  const uint64_t DelegateAccessCost =
-      Module->Host->access_account(CodeAddr) == EVMC_ACCESS_COLD
-          ? zen::evm::COLD_ACCOUNT_ACCESS_COST
-          : zen::evm::WARM_STORAGE_READ_COST;
-  Instance->chargeGas(DelegateAccessCost);
-  return true;
-}
 } // namespace
 
 const RuntimeFunctions &getRuntimeFunctionTable() {
@@ -890,9 +854,13 @@ const uint8_t *evmHandleCreateInternal(zen::runtime::EVMInstance *Instance,
   Instance->setReturnData(std::move(ReturnData));
 
   if (Result.status_code == EVMC_SUCCESS) {
-    static thread_local uint8_t PaddedAddress[32] = {0};
-    memcpy(PaddedAddress + 12, Result.create_address.bytes, 20);
-    return PaddedAddress;
+    // Keep returned CREATE addresses in per-instance cache to avoid aliasing
+    // between nested/re-entrant CREATE paths.
+    auto &ExecCache = Instance->getMessageCache();
+    evmc::bytes32 PaddedAddress{};
+    std::memcpy(PaddedAddress.bytes + 12, Result.create_address.bytes, 20);
+    ExecCache.CreateAddresses.push_back(PaddedAddress);
+    return ExecCache.CreateAddresses.back().bytes;
   }
   return ZeroAddress;
 }
@@ -926,12 +894,6 @@ static uint64_t evmHandleCallInternal(
   if (Rev >= EVMC_BERLIN &&
       Module->Host->access_account(TargetAddr) == EVMC_ACCESS_COLD) {
     Instance->chargeGas(zen::evm::ADDITIONAL_COLD_ACCOUNT_ACCESS_COST);
-  }
-
-  evmc::address CodeAddr = TargetAddr;
-  if (!resolveDelegatedCallCodeAddress(Instance, TargetAddr, CodeAddr)) {
-    Instance->setReturnData({});
-    return 0;
   }
 
   const bool HasValueArgs = CallKind == EVMC_CALL || CallKind == EVMC_CALLCODE;
@@ -1032,16 +994,10 @@ static uint64_t evmHandleCallInternal(
                    ? CurrentMsg->value
                    : intx::be::store<evmc::bytes32>(Value),
       .create2_salt = {},
-      .code_address = CodeAddr,
+      .code_address = TargetAddr,
       .code = nullptr,
       .code_size = 0,
   };
-  if (std::memcmp(TargetAddr.bytes, CodeAddr.bytes, sizeof(TargetAddr.bytes)) !=
-      0) {
-    CallMsg.flags |= EVMC_DELEGATED;
-  } else {
-    CallMsg.flags &= ~uint32_t(EVMC_DELEGATED);
-  }
 
   Instance->pushMessage(&CallMsg);
   evmc::Result Result = Module->Host->call(CallMsg);
