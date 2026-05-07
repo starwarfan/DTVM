@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <string_view>
 #include <yaml-cpp/yaml.h>
 
 #include "evm/evm.h"
@@ -145,25 +146,12 @@ struct EVMExecutionResult {
   bool JITCompiled = false;
 };
 
-EVMExecutionResult executeEvmBytecodeFile(const std::string &FilePath,
-                                          common::RunMode Mode,
-                                          std::vector<uint8_t> CallData = {}) {
+EVMExecutionResult executeEvmBytecode(const std::string &ModuleName,
+                                      const std::vector<uint8_t> &Bytecode,
+                                      common::RunMode Mode,
+                                      std::vector<uint8_t> CallData = {},
+                                      uint64_t ExecutionGasLimitOverride = 0) {
   EVMExecutionResult Empty;
-
-  std::ifstream Fin(FilePath);
-  EXPECT_TRUE(Fin.is_open()) << "Failed to open test file: " << FilePath;
-  if (!Fin.is_open()) {
-    return Empty;
-  }
-
-  std::string Hex;
-  Fin >> Hex;
-  zen::utils::trimString(Hex);
-  auto BytecodeBuf = zen::utils::fromHex(Hex);
-  EXPECT_TRUE(BytecodeBuf) << "Failed to convert hex to bytecode";
-  if (!BytecodeBuf) {
-    return Empty;
-  }
 
   RuntimeConfig Config;
   Config.Mode = Mode;
@@ -177,26 +165,28 @@ EVMExecutionResult executeEvmBytecodeFile(const std::string &FilePath,
   }
   MockedHost->setRuntime(RT.get());
 
-  auto ModRet =
-      RT->loadEVMModule(FilePath, BytecodeBuf->data(), BytecodeBuf->size());
-  EXPECT_TRUE(ModRet) << "Failed to load module: " << FilePath;
+  auto ModRet = RT->loadEVMModule(ModuleName, Bytecode.data(), Bytecode.size());
+  EXPECT_TRUE(ModRet) << "Failed to load module: " << ModuleName;
   if (!ModRet) {
     return Empty;
   }
   EVMModule *Mod = *ModRet;
 
   Isolation *Iso = RT->createManagedIsolation();
-  EXPECT_TRUE(Iso != nullptr) << "Failed to create isolation: " << FilePath;
+  EXPECT_TRUE(Iso != nullptr) << "Failed to create isolation: " << ModuleName;
   if (!Iso) {
     return Empty;
   }
 
-  uint64_t GasLimit = 0xFFFF'FFFF'FFFF;
-  const uint64_t IntrinsicGas = zen::evm::BASIC_EXECUTION_COST;
-  const uint64_t ExecutionGasLimit = GasLimit - IntrinsicGas;
+  uint64_t ExecutionGasLimit = ExecutionGasLimitOverride;
+  if (ExecutionGasLimit == 0) {
+    uint64_t GasLimit = 0xFFFF'FFFF'FFFF;
+    const uint64_t IntrinsicGas = zen::evm::BASIC_EXECUTION_COST;
+    ExecutionGasLimit = GasLimit - IntrinsicGas;
+  }
 
   auto InstRet = Iso->createEVMInstance(*Mod, ExecutionGasLimit);
-  EXPECT_TRUE(InstRet) << "Failed to create instance: " << FilePath;
+  EXPECT_TRUE(InstRet) << "Failed to create instance: " << ModuleName;
   if (!InstRet) {
     return Empty;
   }
@@ -231,6 +221,29 @@ EVMExecutionResult executeEvmBytecodeFile(const std::string &FilePath,
   return Exec;
 }
 
+EVMExecutionResult executeEvmBytecodeFile(const std::string &FilePath,
+                                          common::RunMode Mode,
+                                          std::vector<uint8_t> CallData = {}) {
+  EVMExecutionResult Empty;
+
+  std::ifstream Fin(FilePath);
+  EXPECT_TRUE(Fin.is_open()) << "Failed to open test file: " << FilePath;
+  if (!Fin.is_open()) {
+    return Empty;
+  }
+
+  std::string Hex;
+  Fin >> Hex;
+  zen::utils::trimString(Hex);
+  auto BytecodeBuf = zen::utils::fromHex(Hex);
+  EXPECT_TRUE(BytecodeBuf) << "Failed to convert hex to bytecode";
+  if (!BytecodeBuf) {
+    return Empty;
+  }
+
+  return executeEvmBytecode(FilePath, *BytecodeBuf, Mode, std::move(CallData));
+}
+
 std::vector<uint8_t> makeUint256Calldata(uint64_t Value) {
   std::vector<uint8_t> Data(32, 0);
   for (size_t I = 0; I < sizeof(Value); ++I) {
@@ -238,6 +251,46 @@ std::vector<uint8_t> makeUint256Calldata(uint64_t Value) {
     Value >>= 8;
   }
   return Data;
+}
+
+void expectMemoryLinearMstoreOverlapResult(uint64_t Stride,
+                                           const std::string &ExpectedHex) {
+  constexpr std::string_view BytecodeHex =
+      "600035808080528101808052810180805281018080528151600052805160205260406000"
+      "F3";
+  auto BytecodeBuf = zen::utils::fromHex(BytecodeHex);
+  ASSERT_TRUE(BytecodeBuf) << "Failed to build overlap probe bytecode";
+
+  auto Exec = executeEvmBytecode("memory_linear_overlap_probe", *BytecodeBuf,
+                                 common::RunMode::MultipassMode,
+                                 makeUint256Calldata(Stride));
+
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Exec.JITCompiled);
+#endif
+  EXPECT_EQ(Exec.Status, EVMC_SUCCESS);
+  EXPECT_EQ(Exec.OutputHex, ExpectedHex);
+}
+
+void expectMultipassJitModuleLoads(const std::string &ModuleName,
+                                   const std::vector<uint8_t> &Bytecode) {
+  RuntimeConfig Config;
+  Config.Mode = common::RunMode::MultipassMode;
+
+  auto MockedHost = std::make_unique<zen::evm::ZenMockedEVMHost>();
+  MockedHost->tx_context.tx_origin = zen::evm::DEFAULT_DEPLOYER_ADDRESS;
+  auto RT = Runtime::newEVMRuntime(Config, MockedHost.get());
+  ASSERT_TRUE(RT != nullptr) << "Failed to create runtime";
+
+  MockedHost->setRuntime(RT.get());
+
+  auto ModRet = RT->loadEVMModule(ModuleName, Bytecode.data(), Bytecode.size());
+  ASSERT_TRUE(ModRet) << "Failed to load module: " << ModuleName;
+
+#ifdef ZEN_ENABLE_JIT
+  EVMModule *Mod = *ModRet;
+  EXPECT_TRUE(Mod->getJITCode() != nullptr && Mod->getJITCodeSize() > 0);
+#endif
 }
 #endif
 
@@ -395,5 +448,68 @@ TEST(EVMMultipassLinearPrecheckTest, MemoryLinearMstoreStepUsesNonZeroStride) {
   EXPECT_EQ(Exec.Status, EVMC_SUCCESS);
   EXPECT_EQ(Exec.OutputHex,
             "0000000000000000000000000000000000000000000000000000000000000080");
+}
+
+TEST(EVMMultipassLinearPrecheckTest,
+     MemoryLinearMstoreOverlapStride8PreservesSemantics) {
+  expectMemoryLinearMstoreOverlapResult(
+      0x08, "0000000000000000000000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000000000000000020");
+}
+
+TEST(EVMMultipassLinearPrecheckTest,
+     MemoryLinearMstoreOverlapStride16PreservesSemantics) {
+  expectMemoryLinearMstoreOverlapResult(
+      0x10, "0000000000000000000000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000000000000000040");
+}
+
+TEST(EVMMultipassLinearPrecheckTest,
+     MemoryLinearMstoreOverlapStride24DisablesElisionButPreservesSemantics) {
+  expectMemoryLinearMstoreOverlapResult(
+      0x18, "0000000000000000000000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000000000000000060");
+}
+
+TEST(EVMMultipassDisplacedBytes32Test,
+     MemoryConstMloadAboveI32DisplacementLimitCompiles) {
+  const std::vector<uint8_t> Bytecode = {0x63, 0x7f, 0xff, 0xff,
+                                         0xe8, 0x51, 0x00};
+  expectMultipassJitModuleLoads("memory_const_mload_i32_disp_limit", Bytecode);
+}
+
+TEST(EVMMultipassDisplacedBytes32Test,
+     MemoryConstMstoreAboveI32DisplacementLimitCompiles) {
+  const std::vector<uint8_t> Bytecode = {0x60, 0x01, 0x63, 0x7f, 0xff,
+                                         0xff, 0xe8, 0x52, 0x00};
+  expectMultipassJitModuleLoads("memory_const_mstore_i32_disp_limit", Bytecode);
+}
+
+TEST(EVMMultipassDisplacedBytes32Test,
+     MemoryConstMloadAboveI32DisplacementLimitReturnsOutOfGas) {
+  const std::vector<uint8_t> Bytecode = {0x63, 0x7f, 0xff, 0xff,
+                                         0xe8, 0x51, 0x00};
+  auto Exec =
+      executeEvmBytecode("memory_const_mload_i32_disp_limit_oog", Bytecode,
+                         common::RunMode::MultipassMode, {}, 1'000'000);
+
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Exec.JITCompiled);
+#endif
+  EXPECT_EQ(Exec.Status, EVMC_OUT_OF_GAS);
+}
+
+TEST(EVMMultipassDisplacedBytes32Test,
+     MemoryConstMstoreAboveI32DisplacementLimitReturnsOutOfGas) {
+  const std::vector<uint8_t> Bytecode = {0x60, 0x01, 0x63, 0x7f, 0xff,
+                                         0xff, 0xe8, 0x52, 0x00};
+  auto Exec =
+      executeEvmBytecode("memory_const_mstore_i32_disp_limit_oog", Bytecode,
+                         common::RunMode::MultipassMode, {}, 1'000'000);
+
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Exec.JITCompiled);
+#endif
+  EXPECT_EQ(Exec.Status, EVMC_OUT_OF_GAS);
 }
 #endif

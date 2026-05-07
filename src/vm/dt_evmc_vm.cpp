@@ -94,22 +94,42 @@ static constexpr size_t MAX_MODULE_CACHE_SIZE = 4096;
 struct CodeAddrRevKey {
   evmc_address Addr;
   evmc_revision Rev;
+  zen::runtime::EVMMemorySpecializationProfile MemoryProfile = {};
 };
 
 struct CodeAddrRevHash {
   size_t operator()(const CodeAddrRevKey &K) const {
+    const auto CodegenKey =
+        getEVMMemorySpecializationCodegenKey(K.MemoryProfile);
     uint64_t H;
     std::memcpy(&H, K.Addr.bytes + 12, sizeof(H));
-    return H ^ (static_cast<size_t>(K.Rev) * 2654435761u);
+    return H ^ (static_cast<size_t>(K.Rev) * 2654435761u) ^
+           (static_cast<size_t>(CodegenKey.SkipLeadingZeroLimbStores) << 20);
   }
 };
 
 struct CodeAddrRevEqual {
   bool operator()(const CodeAddrRevKey &A, const CodeAddrRevKey &B) const {
+    // Keep the cache-key dependency explicit: today only the codegen-relevant
+    // specialization fields participate in module identity. If additional
+    // EVMMemorySpecializationProfile fields start affecting lowering or JIT
+    // codegen, update getEVMMemorySpecializationCodegenKey() accordingly.
+    const auto ACodegenKey =
+        getEVMMemorySpecializationCodegenKey(A.MemoryProfile);
+    const auto BCodegenKey =
+        getEVMMemorySpecializationCodegenKey(B.MemoryProfile);
     return A.Rev == B.Rev &&
+           ACodegenKey.SkipLeadingZeroLimbStores ==
+               BCodegenKey.SkipLeadingZeroLimbStores &&
            std::memcmp(A.Addr.bytes, B.Addr.bytes, sizeof(A.Addr.bytes)) == 0;
   }
 };
+
+zen::runtime::EVMMemorySpecializationProfile
+deriveMemorySpecializationProfile(const evmc_message *Msg) {
+  return deriveEVMMemorySpecializationProfileFromCallData(
+      Msg ? Msg->input_data : nullptr, Msg ? Msg->input_size : 0);
+}
 
 /// Validate that the cached module's code matches the provided code.
 /// Note: This relies on the host guaranteeing that deployed code at a given
@@ -313,11 +333,11 @@ bool shouldRetryModuleLoadWithFastRA(const DTVM *VM, const Error &Err) {
          Err.getSubphase() == ErrorSubphase::RegAlloc;
 }
 
-zen::common::MayBe<EVMModule *>
-loadEVMModuleWithRegAllocRetry(DTVM *VM, const std::string &ModName,
-                               const uint8_t *Code, size_t CodeSize,
-                               evmc_revision Rev) {
-  auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
+zen::common::MayBe<EVMModule *> loadEVMModuleWithRegAllocRetry(
+    DTVM *VM, const std::string &ModName, const uint8_t *Code, size_t CodeSize,
+    evmc_revision Rev, EVMMemorySpecializationProfile MemoryProfile = {}) {
+  auto ModRet =
+      VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev, MemoryProfile);
   if (ModRet || !shouldRetryModuleLoadWithFastRA(VM, ModRet.getError())) {
     return ModRet;
   }
@@ -325,14 +345,14 @@ loadEVMModuleWithRegAllocRetry(DTVM *VM, const std::string &ModName,
   RuntimeConfig RetryConfig = VM->Config;
   RetryConfig.DisableMultipassGreedyRA = true;
   ScopedConfig Retry(VM->RT.get(), RetryConfig);
-  return VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
+  return VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev, MemoryProfile);
 }
 
 EVMModule *loadTransientModule(DTVM *VM, const uint8_t *Code, size_t CodeSize,
                                evmc_revision Rev) {
   std::string ModName = "tmp_mod_" + std::to_string(VM->ModCounter++);
-  auto ModRet =
-      loadEVMModuleWithRegAllocRetry(VM, ModName, Code, CodeSize, Rev);
+  auto ModRet = loadEVMModuleWithRegAllocRetry(
+      VM, ModName, Code, CodeSize, Rev, EVMMemorySpecializationProfile{});
   if (!ModRet)
     return nullptr;
   return *ModRet;
@@ -351,6 +371,8 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   }
 
   IsTransient = false;
+  const EVMMemorySpecializationProfile Profile =
+      deriveMemorySpecializationProfile(Msg);
 
   // L0 disabled: pointer comparison is unsafe when callers reuse addresses
   // for different bytecode (e.g. test frameworks, repeated allocations).
@@ -359,7 +381,7 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   EVMModule *Mod = nullptr;
 
   // L1: Address-based LRU cache lookup
-  CodeAddrRevKey AddrKey{Msg->code_address, Rev};
+  CodeAddrRevKey AddrKey{Msg->code_address, Rev, Profile};
   auto It = VM->AddrCache.find(AddrKey);
   if (It != VM->AddrCache.end() &&
       validateCodeMatch(Code, CodeSize, It->second.first)) {
@@ -396,8 +418,8 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
     }
 
     std::string ModName = "mod_" + std::to_string(VM->ModCounter++);
-    auto ModRet =
-        loadEVMModuleWithRegAllocRetry(VM, ModName, Code, CodeSize, Rev);
+    auto ModRet = loadEVMModuleWithRegAllocRetry(VM, ModName, Code, CodeSize,
+                                                 Rev, Profile);
     if (!ModRet)
       return nullptr;
     Mod = *ModRet;

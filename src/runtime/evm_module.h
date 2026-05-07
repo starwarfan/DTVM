@@ -6,6 +6,7 @@
 #include "evm/evm.h"
 #include "evm/evm_cache.h"
 #include "evmc/evmc.hpp"
+#include "runtime/evm_memory_specialization.h"
 #include "runtime/module.h"
 #include <limits>
 
@@ -26,7 +27,8 @@ class EVMModule final : public BaseModule<EVMModule> {
 public:
   using Byte = zen::common::Byte;
   static EVMModuleUniquePtr
-  newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder, evmc_revision Rev);
+  newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder, evmc_revision Rev,
+               EVMMemorySpecializationProfile MemoryProfile = {});
 
   virtual ~EVMModule();
 
@@ -37,6 +39,24 @@ public:
   const evm::EVMBytecodeCache &getBytecodeCache() const;
   evmc_revision getRevision() const { return Revision; }
   void setRevision(evmc_revision Rev) { Revision = Rev; }
+  const EVMMemorySpecializationProfile &getMemorySpecializationProfile() const {
+    return MemoryProfile;
+  }
+  void setMemorySpecializationProfile(EVMMemorySpecializationProfile Profile) {
+    MemoryProfile = Profile;
+  }
+  uint8_t getMemoryLinearStrideSkipLeadingZeroLimbStores() const {
+    return MemoryProfile.SkipLeadingZeroLimbStores;
+  }
+  bool hasFullCallDataLoad0Window() const {
+    return MemoryProfile.HasFullCallDataLoad0Window;
+  }
+  bool hasKnownCallDataLoad0Low64() const {
+    return MemoryProfile.HasKnownCallDataLoad0Low64;
+  }
+  uint64_t getKnownCallDataLoad0Low64() const {
+    return MemoryProfile.KnownCallDataLoad0Low64;
+  }
   static constexpr int32_t getCodeSizeOffset() {
     static_assert(offsetof(EVMModule, CodeSize) <=
                       std::numeric_limits<int32_t>::max(),
@@ -76,6 +96,7 @@ private:
   mutable bool BytecodeCacheInitialized = false;
   mutable evm::EVMBytecodeCache BytecodeCache;
   evmc_revision Revision = zen::evm::DEFAULT_REVISION;
+  EVMMemorySpecializationProfile MemoryProfile = {};
 
 #ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 #endif
