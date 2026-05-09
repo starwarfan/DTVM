@@ -674,6 +674,8 @@ void evmSetReturnDataCopy(zen::runtime::EVMInstance *Instance,
     Instance->setGas(0);
     zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT(
         Instance, zen::common::ErrorCode::OutOfBoundsMemory);
+    // No-op trap body when ZEN_ENABLE_CPU_EXCEPTION is off; do not run copy/gas.
+    return;
   }
 
   // When Size is 0, no memory operations are needed
@@ -978,6 +980,8 @@ static uint64_t evmHandleCallInternal(
   } else if (CallGas > GasLeft) {
     zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT(
         Instance, zen::common::ErrorCode::GasLimitExceeded);
+    Instance->setReturnData({});
+    return 0;
   }
 
   if (HasValueArgs && HasValue) {
@@ -1287,6 +1291,7 @@ void evmSetSStore(zen::runtime::EVMInstance *Instance,
       Instance->getGas() <= zen::evm::SSTORE_REQUIRED_ISTANBUL) {
     zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT(
         Instance, zen::common::ErrorCode::GasLimitExceeded);
+    return;
   }
   const auto Key = intx::be::store<evmc::bytes32>(Index);
   const auto Val = intx::be::store<evmc::bytes32>(Value);
