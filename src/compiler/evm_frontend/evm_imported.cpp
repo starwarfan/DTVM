@@ -665,25 +665,33 @@ void evmSetExtCodeCopy(zen::runtime::EVMInstance *Instance,
   }
 }
 
-void evmSetReturnDataCopy(zen::runtime::EVMInstance *Instance,
-                          uint64_t DestOffset, uint64_t Offset, uint64_t Size) {
+uint64_t evmSetReturnDataCopy(zen::runtime::EVMInstance *Instance,
+                              uint64_t DestOffset, uint64_t Offset,
+                              uint64_t Size) {
   const auto &ReturnData = Instance->getReturnData();
   // Additional checks for add overflow
   if (Offset > ReturnData.size() || Size > ReturnData.size() ||
       Offset + Size > ReturnData.size()) {
+    // Match evmHandleInvalid outcome; non-zero return tells MIR to emit an
+    // immediate function return so later opcodes (e.g. STOP) do not run when
+    // CPU exception traps are disabled.
+    Instance->restoreGasRefundSnapshot();
+    Instance->setReturnData({});
+    evmc::Result ExeResult(
+        EVMC_INVALID_MEMORY_ACCESS, 0, Instance ? Instance->getGasRefund() : 0,
+        Instance->getReturnData().data(), Instance->getReturnData().size());
     Instance->setGas(0);
-    zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT(
-        Instance, zen::common::ErrorCode::OutOfBoundsMemory);
-    // No-op trap body when ZEN_ENABLE_CPU_EXCEPTION is off; do not run copy/gas.
-    return;
+    Instance->setExeResult(std::move(ExeResult));
+    Instance->exit(9);
+    return 1;
   }
 
   // When Size is 0, no memory operations are needed
   if (Size == 0) {
-    return;
+    return 0;
   }
   if (!Instance->expandMemoryChecked(DestOffset, Size)) {
-    return;
+    return 0;
   }
   if (uint64_t CopyGas = calculateWordCopyGas(Size)) {
     Instance->chargeGas(CopyGas);
@@ -694,6 +702,7 @@ void evmSetReturnDataCopy(zen::runtime::EVMInstance *Instance,
   uint64_t CopySize = std::min<uint64_t>(
       Size, static_cast<uint64_t>(ReturnData.size()) - Offset);
   std::memcpy(MemoryBase + DestOffset, ReturnData.data() + Offset, CopySize);
+  return 0;
 }
 
 void evmExpandMemoryNoGas(zen::runtime::EVMInstance *Instance,
