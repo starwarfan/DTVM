@@ -14,8 +14,8 @@ Head-and-tail-only bytecode checks could false-match different contracts of the 
 
 ## Impact
 
-- `src/vm/dt_evmc_vm.cpp`: `validateCodeMatch` now uses full `memcmp` (EIP-170 code size cap keeps cost bounded).
-- `src/evm/opcode_handlers.h`: `EVMResource::clear()` and `EVMResource::ClearGuard`.
+- `src/vm/dt_evmc_vm.cpp`: cache validation is configurable — strict full-bytecode `memcmp` remains the default for correctness; trusted immutable-code hosts can opt into relaxed head/tail window validation via `DTVM_EVM_STRICT_ADDR_CACHE_VALIDATION=false`.
+- `src/evm/opcode_handlers.h`: TLS cleanup is centralized in `BaseInterpreter::interpret()` via `EVMResource::ClearGuard`, so all interpreter invocations are covered automatically.
 - `src/vm/dt_evmc_vm.cpp`, `src/runtime/runtime.cpp`: clear TLS after interpreter runs (RAII guard).
 - `src/tests/evm_module_cache_tests.cpp`: regression for same head/tail, different middle.
 
@@ -23,5 +23,5 @@ Head-and-tail-only bytecode checks could false-match different contracts of the 
 
 - [x] Implementation complete
 - [x] Tests added/updated
-- [ ] Module specs in `docs/modules/` updated (if affected)
+- [x] Module specs in `docs/modules/` updated (if affected)
 - [ ] Build and tests pass

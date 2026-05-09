@@ -682,7 +682,7 @@ uint64_t evmSetReturnDataCopy(zen::runtime::EVMInstance *Instance,
         Instance->getReturnData().data(), Instance->getReturnData().size());
     Instance->setGas(0);
     Instance->setExeResult(std::move(ExeResult));
-    Instance->exit(9);
+    Instance->exit(EVMC_INVALID_MEMORY_ACCESS);
     return 1;
   }
 
