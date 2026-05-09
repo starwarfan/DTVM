@@ -40,8 +40,8 @@ class EVMCallThreadState {
   typedef void (*SigActionHandlerType)(int, siginfo_t *, void *);
 
 public:
-  EVMCallThreadState(runtime::EVMInstance *Inst, sigjmp_buf *Env, void *FrameAddr,
-                     void *PC = nullptr)
+  EVMCallThreadState(runtime::EVMInstance *Inst, sigjmp_buf *Env,
+                     void *FrameAddr, void *PC = nullptr)
       : Inst(Inst) {
     StartFrame = {.PC = PC, .FrameAddr = FrameAddr};
     Parent = currentThreadStateOrUpdate(nullptr, false);

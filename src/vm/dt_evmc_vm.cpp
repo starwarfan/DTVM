@@ -739,9 +739,8 @@ DTVM::DTVM()
     if (parseBoolEnvValue(StrictValidation, ParsedStrictValidation)) {
       EnableStrictAddrCacheValidation = ParsedStrictValidation;
     } else {
-      ZEN_LOG_WARN(
-          "ignore invalid DTVM_EVM_STRICT_ADDR_CACHE_VALIDATION=%s",
-          StrictValidation);
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_STRICT_ADDR_CACHE_VALIDATION=%s",
+                   StrictValidation);
     }
   }
 }

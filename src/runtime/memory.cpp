@@ -332,8 +332,8 @@ void WasmMemoryAllocator::mprotectReadWriteWasmMemoryData(
       }
     }
   }
-  if (0 != ::mprotect(Data.MemoryData, Data.MemorySize,
-                      PROT_READ | PROT_WRITE)) {
+  if (0 !=
+      ::mprotect(Data.MemoryData, Data.MemorySize, PROT_READ | PROT_WRITE)) {
     ZEN_ABORT();
   }
 }
