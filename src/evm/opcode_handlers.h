@@ -57,6 +57,17 @@ public:
   static void setMetricsTable(const evmc_instruction_metrics *Table) {
     CurrentMetricsTable = Table;
   }
+  /// Clear thread-local execution pointers after an interpreter run so reused
+  /// InterpreterExecContext cannot leak cross-call state to host or tooling.
+  static void clear() {
+    CurrentFrame = nullptr;
+    CurrentContext = nullptr;
+    CurrentMetricsTable = nullptr;
+  }
+  /// Runs clear() on scope exit (including when interpret() throws).
+  struct ClearGuard {
+    ~ClearGuard() { clear(); }
+  };
   static const evmc_instruction_metrics *getMetricsTable() {
     return CurrentMetricsTable;
   }

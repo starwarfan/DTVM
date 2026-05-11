@@ -5931,9 +5931,27 @@ void EVMMirBuilder::handleReturnDataCopy(Operand DestOffsetComponents,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemory();
 #endif
-  callRuntimeFor<void, uint64_t, uint64_t, uint64_t>(
+  Operand StatusOp = callRuntimeFor<uint64_t, uint64_t, uint64_t, uint64_t>(
       RuntimeFunctions.SetReturnDataCopy, DestOffsetComponents,
       OffsetComponents, SizeComponents);
+
+  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  U256Inst StatusParts = extractU256Operand(StatusOp);
+  MInstruction *ZeroI = createIntConstInstruction(I64Type, 0);
+  MInstruction *IsFatal = createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_NE, &Ctx.I64Type, StatusParts[0],
+      ZeroI);
+
+  MBasicBlock *ContinueBB = createBasicBlock();
+  MBasicBlock *FatalBB = createBasicBlock();
+  createInstruction<BrIfInstruction>(true, Ctx, IsFatal, FatalBB, ContinueBB);
+  addSuccessor(FatalBB);
+  addSuccessor(ContinueBB);
+
+  setInsertBlock(FatalBB);
+  createInstruction<ReturnInstruction>(true, &Ctx.VoidType, nullptr);
+
+  setInsertBlock(ContinueBB);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif

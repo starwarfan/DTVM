@@ -359,6 +359,9 @@ void InterpreterExecContext::setResource() {
 }
 
 void BaseInterpreter::interpret() {
+  // Always clear TLS execution pointers on function exit so all call sites are
+  // covered (including tests/tools that invoke the interpreter directly).
+  EVMResource::ClearGuard ClearTls;
   EVMFrame *Frame = Context.getCurFrame();
 
   EVM_FRAME_CHECK(Frame);

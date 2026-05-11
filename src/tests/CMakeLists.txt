@@ -74,6 +74,7 @@ if(ZEN_ENABLE_SPEC_TEST)
     # Only build evmFallbackExecutionTests if dtvmapi library is available
     if(ZEN_ENABLE_LIBEVM)
       add_executable(evmFallbackExecutionTests evm_fallback_execution_tests.cpp)
+      add_executable(evmModuleCacheTests evm_module_cache_tests.cpp)
     endif()
     add_executable(mptCompareCpp mpt_compare_cpp.cpp)
   else()
@@ -146,6 +147,11 @@ if(ZEN_ENABLE_SPEC_TEST)
             PRIVATE dtvmapi gtest_main -fsanitize=address
             PUBLIC ${GTEST_BOTH_LIBRARIES}
           )
+          target_link_libraries(
+            evmModuleCacheTests
+            PRIVATE dtvmapi gtest_main -fsanitize=address
+            PUBLIC ${GTEST_BOTH_LIBRARIES}
+          )
         endif()
         target_link_libraries(
           mptCompareCpp PRIVATE dtvmcore rapidjson mpt -fsanitize=address
@@ -209,6 +215,11 @@ if(ZEN_ENABLE_SPEC_TEST)
             PRIVATE dtvmapi gtest_main -fsanitize=address -static-libasan
             PUBLIC ${GTEST_BOTH_LIBRARIES}
           )
+          target_link_libraries(
+            evmModuleCacheTests
+            PRIVATE dtvmapi gtest_main -fsanitize=address -static-libasan
+            PUBLIC ${GTEST_BOTH_LIBRARIES}
+          )
         endif()
         target_link_libraries(
           mptCompareCpp PRIVATE dtvmcore rapidjson mpt -fsanitize=address
@@ -257,6 +268,11 @@ if(ZEN_ENABLE_SPEC_TEST)
           PRIVATE dtvmapi gtest_main
           PUBLIC ${GTEST_BOTH_LIBRARIES}
         )
+        target_link_libraries(
+          evmModuleCacheTests
+          PRIVATE dtvmapi gtest_main
+          PUBLIC ${GTEST_BOTH_LIBRARIES}
+        )
       endif()
       target_link_libraries(mptCompareCpp PRIVATE dtvmcore rapidjson mpt)
     endif()
@@ -288,6 +304,7 @@ if(ZEN_ENABLE_SPEC_TEST)
     add_test(NAME evmStateTests COMMAND evmStateTests)
     if(ZEN_ENABLE_LIBEVM)
       add_test(NAME evmFallbackExecutionTests COMMAND evmFallbackExecutionTests)
+      add_test(NAME evmModuleCacheTests COMMAND evmModuleCacheTests)
     endif()
   endif()
 endif()

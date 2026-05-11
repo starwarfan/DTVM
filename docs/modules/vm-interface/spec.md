@@ -43,7 +43,9 @@ This module does not include: EVM bytecode compilation (compiler), interpreter/J
 ### 5. Module Cache Strategy
 
 - **L1 address cache**: Key `CodeAddrRevKey{code_address, revision}`; value `EVMModule *`
-- **Validation**: `validateCodeMatch()` checks cached module Code against input Code (first/last 256 bytes) to avoid address reuse pollution
+- **Validation**: `validateCodeMatch()` supports two modes:
+  - strict (default): full-bytecode equality check (`DTVM_EVM_STRICT_ADDR_CACHE_VALIDATION=true`)
+  - relaxed: first/last 256-byte window check (`DTVM_EVM_STRICT_ADDR_CACHE_VALIDATION=false`) for trusted immutable-code hosts
 - **Eviction**: On validation failure, unload old module, erase cache entry, cold-load new module
 - L0 pointer cache disabled (unsafe with address reuse); L0 state only for eviction consistency
 
@@ -77,7 +79,7 @@ This module does not include: EVM bytecode compilation (compiler), interpreter/J
 
 - **Determinism**: Same input produces same `evmc_result`; no host-dependent non-determinism
 - **Exception safety**: `HostContextScope`, `InstanceGuard` guarantee Host context restore and temporary instance release on exception
-- **Cache consistency**: Code of modules in `AddrCache` must match bytecode at code_address for key (header/tail check)
+- **Cache consistency**: In strict mode, code of modules in `AddrCache` must match bytecode at `code_address` exactly
 - **Single-thread**: EVMInstance does not support concurrent execution (aligned with runtime/evm)
 
 ## Error Codes

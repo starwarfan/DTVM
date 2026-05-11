@@ -5,17 +5,18 @@
 #include "common/enums.h"
 #include "common/errors.h"
 #include "evm/interpreter.h"
+#include "evm/opcode_handlers.h"
 #include "runtime/config.h"
 #include "runtime/evm_instance.h"
 #include "runtime/isolation.h"
 #include "runtime/runtime.h"
 #include "wrapped_host.h"
-#include <algorithm>
 
 #include <evmc/evmc.h>
 #include <evmc/evmc.hpp>
 #include <evmc/helpers.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
@@ -132,24 +133,27 @@ deriveMemorySpecializationProfile(const evmc_message *Msg) {
 }
 
 /// Validate that the cached module's code matches the provided code.
-/// Note: This relies on the host guaranteeing that deployed code at a given
-/// address is immutable. We only check the head and tail (up to 256 bytes each)
-/// as a defense-in-depth measure against accidental cache corruption.
-/// For fully untrusted environments where hosts might reuse addresses for
-/// different bytecode, a full CRC/hash check should be implemented instead.
+/// Strict mode performs full-bytecode comparison for hostile/non-standard hosts
+/// that may reuse the same code address for different bytecode.
+/// Relaxed mode checks head/tail windows (fast path for trusted immutable-code
+/// hosts). EIP-170 caps contract code size at 24 KiB.
 bool validateCodeMatch(const uint8_t *Code, size_t CodeSize,
-                       const EVMModule *Mod) {
+                       const EVMModule *Mod, bool StrictValidation) {
   if (CodeSize != Mod->CodeSize)
     return false;
   if (CodeSize == 0)
     return true;
   auto *ModCode = reinterpret_cast<const uint8_t *>(Mod->Code);
-  size_t HeadLen = std::min(CodeSize, static_cast<size_t>(256));
+  if (StrictValidation) {
+    return std::memcmp(Code, ModCode, CodeSize) == 0;
+  }
+  constexpr size_t kWindow = 256;
+  const size_t HeadLen = std::min(CodeSize, kWindow);
   if (std::memcmp(Code, ModCode, HeadLen) != 0)
     return false;
-  if (CodeSize > 256) {
-    size_t TailLen = std::min(CodeSize, static_cast<size_t>(256));
-    size_t TailOffset = CodeSize - TailLen;
+  if (CodeSize > kWindow) {
+    const size_t TailLen = std::min(CodeSize, kWindow);
+    const size_t TailOffset = CodeSize - TailLen;
     if (std::memcmp(Code + TailOffset, ModCode + TailOffset, TailLen) != 0)
       return false;
   }
@@ -205,6 +209,9 @@ struct DTVM : evmc_vm {
   std::unique_ptr<Runtime> RT;
   std::unique_ptr<::WrappedHost> ExecHost;
   Isolation *Iso = nullptr;
+  // Default to strict (full bytecode equality) for correctness in tests and
+  // non-standard hosts. Trusted hosts can opt out via env.
+  bool EnableStrictAddrCacheValidation = true;
 
   // ---- Module & instance cache (shared by interpreter and multipass) ----
   // L0: pointer-based inline cache (fastest, 2 integer comparisons)
@@ -319,8 +326,9 @@ bool shouldUsePersistentModuleCache(const evmc_message *Msg) {
   // different initcode across transactions, and initcode is one-shot.
   // Regular calls (CALL/DELEGATECALL/STATICCALL/CALLCODE) at any depth are
   // safe to cache: EVM guarantees that deployed code at a given address is
-  // immutable. The module is keyed by (code_address, revision) and a
-  // defense-in-depth head/tail validation is performed before reuse. Each
+  // immutable. The module is keyed by (code_address, revision) and
+  // configurable validation (strict full compare vs relaxed head/tail) runs
+  // before reuse. Each
   // nested call gets its own EVMInstance so reentrancy is safe.
   return Msg != nullptr && Msg->kind != EVMC_CREATE &&
          Msg->kind != EVMC_CREATE2;
@@ -384,7 +392,8 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   CodeAddrRevKey AddrKey{Msg->code_address, Rev, Profile};
   auto It = VM->AddrCache.find(AddrKey);
   if (It != VM->AddrCache.end() &&
-      validateCodeMatch(Code, CodeSize, It->second.first)) {
+      validateCodeMatch(Code, CodeSize, It->second.first,
+                        VM->EnableStrictAddrCacheValidation)) {
     Mod = It->second.first;
     // LRU touch: move to front (most recently used)
     VM->LRUOrder.splice(VM->LRUOrder.begin(), VM->LRUOrder, It->second.second);
@@ -479,10 +488,14 @@ EVMInstance *getOrCreateInstance(DTVM *VM, EVMModule *Mod, evmc_revision Rev,
         return nullptr;
       TheInst = *InstRet;
       VM->CachedMainInst = TheInst;
+      // Ensure revision is initialized for the first use of cached main
+      // instance; default is DEFAULT_REVISION (CANCUN), which can overcharge
+      // pre-fork blocks if not reset.
+      TheInst->resetForNewCall(Rev, *Mod);
     }
   } else {
     // Cache hit: same module, just reset with new revision
-    TheInst->resetForNewCall(Rev);
+    TheInst->resetForNewCall(Rev, *Mod);
   }
 
   return TheInst;
@@ -716,6 +729,18 @@ DTVM::DTVM()
       Config.EnableEvmGasMetering = ParsedEnableGas;
     } else {
       ZEN_LOG_WARN("ignore invalid DTVM_EVM_ENABLE_GAS_METERING=%s", EnableGas);
+    }
+  }
+
+  if (const char *StrictValidation =
+          std::getenv("DTVM_EVM_STRICT_ADDR_CACHE_VALIDATION");
+      StrictValidation != nullptr) {
+    bool ParsedStrictValidation = true;
+    if (parseBoolEnvValue(StrictValidation, ParsedStrictValidation)) {
+      EnableStrictAddrCacheValidation = ParsedStrictValidation;
+    } else {
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_STRICT_ADDR_CACHE_VALIDATION=%s",
+                   StrictValidation);
     }
   }
 }
