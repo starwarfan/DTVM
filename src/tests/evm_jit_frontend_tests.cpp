@@ -218,8 +218,18 @@ public:
   template <size_t NumTopics, typename... Args>
   void handleLogWithTopics(Args...) {}
 
-  Operand handleCall(Operand, Operand, Operand, Operand, Operand, Operand,
-                     Operand) {
+  Operand handleCall(Operand Gas, Operand ToAddr, Operand Value,
+                     Operand ArgsOffset, Operand ArgsSize, Operand RetOffset,
+                     Operand RetSize) {
+    LastCallArgs[0] = Gas.resolvedValue();
+    LastCallArgs[1] = ToAddr.resolvedValue();
+    LastCallArgs[2] = Value.resolvedValue();
+    LastCallArgs[3] = ArgsOffset.resolvedValue();
+    LastCallArgs[4] = ArgsSize.resolvedValue();
+    LastCallArgs[5] = RetOffset.resolvedValue();
+    LastCallArgs[6] = RetSize.resolvedValue();
+    HasCallArgs = true;
+    CallCount++;
     return Operand(0);
   }
 
@@ -320,6 +330,15 @@ public:
 
   bool hasLastPushValue() const { return HasLastPushValue; }
 
+  bool hasLastCallArgs() const { return HasCallArgs; }
+
+  size_t callCount() const { return CallCount; }
+
+  MockOperand::U256Value lastCallArg(size_t Index) const {
+    ZEN_ASSERT(Index < LastCallArgs.size() && "call arg index out of range");
+    return LastCallArgs[Index];
+  }
+
   MockOperand::U256Value lastPushValue() const {
     ZEN_ASSERT(HasLastPushValue && "mock push value is missing");
     return LastPushValue;
@@ -342,6 +361,13 @@ private:
   std::vector<Operand> RuntimeStack;
   MockOperand::U256Value LastPushValue = {0, 0, 0, 0};
   bool HasLastPushValue = false;
+  std::array<MockOperand::U256Value, 7> LastCallArgs = {
+      MockOperand::U256Value{0, 0, 0, 0}, MockOperand::U256Value{0, 0, 0, 0},
+      MockOperand::U256Value{0, 0, 0, 0}, MockOperand::U256Value{0, 0, 0, 0},
+      MockOperand::U256Value{0, 0, 0, 0}, MockOperand::U256Value{0, 0, 0, 0},
+      MockOperand::U256Value{0, 0, 0, 0}};
+  bool HasCallArgs = false;
+  size_t CallCount = 0;
 
 #undef MOCK_OPERAND_STUB
 #undef MOCK_VOID_STUB
@@ -693,6 +719,60 @@ TEST(EVMJITFrontendVisitorTest, LegacyRevisionDupSwapUseRuntimeStackPath) {
   EXPECT_EQ(SwapStats.StackPopCount, 0U);
   EXPECT_GT(SwapStats.StackGetCount, 0U);
   EXPECT_GT(SwapStats.StackSetCount, 0U);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     ModernMaterializedMergePreservesCallOperandsAfterDeepDupSwap) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PUSH1 0xaa
+      0x60, 0xbb, // PUSH1 0xbb
+      0x5f,       // PUSH0
+      0x35,       // CALLDATALOAD
+      0x60, 0x0e, // PUSH1 target
+      0x57,       // JUMPI
+      0x60, 0xcc, // PUSH1 0xcc
+      0x60, 0x0e, // PUSH1 target
+      0x56,       // JUMP
+      0x5b,       // JUMPDEST (target)
+      0x5f,       // PUSH0 retSize
+      0x5f,       // PUSH0 retOffset
+      0x5f,       // PUSH0 argsSize
+      0x5f,       // PUSH0 argsOffset
+      0x5f,       // PUSH0 value
+      0x86,       // DUP7 (duplicate deep merged value as to-address)
+      0x90,       // SWAP1
+      0x90,       // SWAP1 (net no-op, keeps swap path exercised)
+      0x60, 0x20, // PUSH1 gas
+      0xf1,       // CALL
+      0x00        // STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *TargetBlock = findBlock(Analyzer, 14);
+  ASSERT_NE(TargetBlock, nullptr);
+  EXPECT_FALSE(TargetBlock->CanLiftStack);
+  EXPECT_EQ(TargetBlock->ResolvedEntryStackDepth, -1);
+  EXPECT_TRUE(TargetBlock->HasInconsistentEntryDepth);
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+  ASSERT_TRUE(Builder.hasLastCallArgs());
+  EXPECT_EQ(Builder.callCount(), 1U);
+  EXPECT_EQ(Builder.lastCallArg(0)[0], 0x20U); // gas
+  EXPECT_EQ(Builder.lastCallArg(1)[0], 0xbbU); // to
+  EXPECT_EQ(Builder.lastCallArg(2)[0], 0x0U);  // value
+  EXPECT_EQ(Builder.lastCallArg(3)[0], 0x0U);  // args offset
+  EXPECT_EQ(Builder.lastCallArg(4)[0], 0x0U);  // args size
+  EXPECT_EQ(Builder.lastCallArg(5)[0], 0x0U);  // ret offset
+  EXPECT_EQ(Builder.lastCallArg(6)[0], 0x0U);  // ret size
 }
 
 TEST(EVMJITFrontendVisitorTest,
