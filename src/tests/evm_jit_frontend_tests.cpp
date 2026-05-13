@@ -664,6 +664,37 @@ TEST(EVMJITFrontendVisitorTest,
   EXPECT_FALSE(Builder.Undefined);
 }
 
+TEST(EVMJITFrontendVisitorTest, LegacyRevisionDupSwapUseRuntimeStackPath) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PUSH1 0xaa
+      0x60, 0xbb, // PUSH1 0xbb
+      0x81,       // DUP2
+      0x90,       // SWAP1
+      0x50,       // POP
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_FRONTIER);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  const auto &DupStats = Builder.accessStats(OP_DUP2);
+  EXPECT_EQ(DupStats.StackPopCount, 0U);
+  EXPECT_GT(DupStats.StackGetCount, 0U);
+
+  const auto &SwapStats = Builder.accessStats(OP_SWAP1);
+  EXPECT_EQ(SwapStats.StackPopCount, 0U);
+  EXPECT_GT(SwapStats.StackGetCount, 0U);
+  EXPECT_GT(SwapStats.StackSetCount, 0U);
+}
+
 TEST(EVMJITFrontendVisitorTest,
      ImplicitStopMaterializesLiftedStackOnFallthrough) {
   const std::vector<uint8_t> Bytecode = {
