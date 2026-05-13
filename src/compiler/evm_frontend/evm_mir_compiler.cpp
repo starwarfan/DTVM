@@ -11,6 +11,7 @@
 #include "utils/hash_utils.h"
 #include "utils/logging.h"
 #include "llvm/Support/Casting.h"
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -4550,6 +4551,24 @@ EVMMirBuilder::handleCall(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
                           Operand ArgsOffsetOp, Operand ArgsSizeOp,
                           Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  if (std::getenv("DTVM_DEBUG_LIFTED_STACK")) {
+    auto low = [](const Operand &Op) -> unsigned long long {
+      return Op.isConstant()
+                 ? static_cast<unsigned long long>(Op.getConstValue()[0])
+                 : 0ULL;
+    };
+    std::fprintf(stderr,
+                 "[lifted-lower] call c=[%d,%d,%d,%d,%d,%d,%d] "
+                 "low=[%llu,%llu,%llu,%llu,%llu,%llu,%llu]\n",
+                 GasOp.isConstant() ? 1 : 0, ToAddrOp.isConstant() ? 1 : 0,
+                 ValueOp.isConstant() ? 1 : 0,
+                 ArgsOffsetOp.isConstant() ? 1 : 0,
+                 ArgsSizeOp.isConstant() ? 1 : 0,
+                 RetOffsetOp.isConstant() ? 1 : 0,
+                 RetSizeOp.isConstant() ? 1 : 0, low(GasOp), low(ToAddrOp),
+                 low(ValueOp), low(ArgsOffsetOp), low(ArgsSizeOp),
+                 low(RetOffsetOp), low(RetSizeOp));
+  }
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -4561,7 +4580,8 @@ EVMMirBuilder::handleCall(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
   syncGasToMemoryFull();
 #endif
   auto Result =
-      callRuntimeFor<uint64_t, uint64_t, const uint8_t *, const intx::uint256 &,
+      callRuntimeFor<uint64_t, uint64_t, const intx::uint256 &,
+                     const intx::uint256 &,
                      uint64_t, uint64_t, uint64_t, uint64_t>(
           RuntimeFunctions.HandleCall, GasOp, ToAddrOp, ValueOp, ArgsOffsetOp,
           ArgsSizeOp, RetOffsetOp, RetSizeOp);
@@ -4577,6 +4597,24 @@ EVMMirBuilder::handleCallCode(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
                               Operand ArgsOffsetOp, Operand ArgsSizeOp,
                               Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  if (std::getenv("DTVM_DEBUG_LIFTED_STACK")) {
+    auto low = [](const Operand &Op) -> unsigned long long {
+      return Op.isConstant()
+                 ? static_cast<unsigned long long>(Op.getConstValue()[0])
+                 : 0ULL;
+    };
+    std::fprintf(stderr,
+                 "[lifted-lower] callcode c=[%d,%d,%d,%d,%d,%d,%d] "
+                 "low=[%llu,%llu,%llu,%llu,%llu,%llu,%llu]\n",
+                 GasOp.isConstant() ? 1 : 0, ToAddrOp.isConstant() ? 1 : 0,
+                 ValueOp.isConstant() ? 1 : 0,
+                 ArgsOffsetOp.isConstant() ? 1 : 0,
+                 ArgsSizeOp.isConstant() ? 1 : 0,
+                 RetOffsetOp.isConstant() ? 1 : 0,
+                 RetSizeOp.isConstant() ? 1 : 0, low(GasOp), low(ToAddrOp),
+                 low(ValueOp), low(ArgsOffsetOp), low(ArgsSizeOp),
+                 low(RetOffsetOp), low(RetSizeOp));
+  }
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -4588,7 +4626,8 @@ EVMMirBuilder::handleCallCode(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
   syncGasToMemoryFull();
 #endif
   auto Result =
-      callRuntimeFor<uint64_t, uint64_t, const uint8_t *, const intx::uint256 &,
+      callRuntimeFor<uint64_t, uint64_t, const intx::uint256 &,
+                     const intx::uint256 &,
                      uint64_t, uint64_t, uint64_t, uint64_t>(
           RuntimeFunctions.HandleCallCode, GasOp, ToAddrOp, ValueOp,
           ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
@@ -4630,6 +4669,23 @@ EVMMirBuilder::handleDelegateCall(Operand GasOp, Operand ToAddrOp,
                                   Operand ArgsOffsetOp, Operand ArgsSizeOp,
                                   Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  if (std::getenv("DTVM_DEBUG_LIFTED_STACK")) {
+    auto low = [](const Operand &Op) -> unsigned long long {
+      return Op.isConstant()
+                 ? static_cast<unsigned long long>(Op.getConstValue()[0])
+                 : 0ULL;
+    };
+    std::fprintf(stderr,
+                 "[lifted-lower] delegatecall c=[%d,%d,%d,%d,%d,%d] "
+                 "low=[%llu,%llu,%llu,%llu,%llu,%llu]\n",
+                 GasOp.isConstant() ? 1 : 0, ToAddrOp.isConstant() ? 1 : 0,
+                 ArgsOffsetOp.isConstant() ? 1 : 0,
+                 ArgsSizeOp.isConstant() ? 1 : 0,
+                 RetOffsetOp.isConstant() ? 1 : 0,
+                 RetSizeOp.isConstant() ? 1 : 0, low(GasOp), low(ToAddrOp),
+                 low(ArgsOffsetOp), low(ArgsSizeOp), low(RetOffsetOp),
+                 low(RetSizeOp));
+  }
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -4640,7 +4696,8 @@ EVMMirBuilder::handleDelegateCall(Operand GasOp, Operand ToAddrOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemoryFull();
 #endif
-  auto Result = callRuntimeFor<uint64_t, uint64_t, const uint8_t *, uint64_t,
+  auto Result = callRuntimeFor<uint64_t, uint64_t, const intx::uint256 &,
+                               uint64_t,
                                uint64_t, uint64_t, uint64_t>(
       RuntimeFunctions.HandleDelegateCall, GasOp, ToAddrOp, ArgsOffsetOp,
       ArgsSizeOp, RetOffsetOp, RetSizeOp);
@@ -4656,6 +4713,23 @@ EVMMirBuilder::handleStaticCall(Operand GasOp, Operand ToAddrOp,
                                 Operand ArgsOffsetOp, Operand ArgsSizeOp,
                                 Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  if (std::getenv("DTVM_DEBUG_LIFTED_STACK")) {
+    auto low = [](const Operand &Op) -> unsigned long long {
+      return Op.isConstant()
+                 ? static_cast<unsigned long long>(Op.getConstValue()[0])
+                 : 0ULL;
+    };
+    std::fprintf(stderr,
+                 "[lifted-lower] staticcall c=[%d,%d,%d,%d,%d,%d] "
+                 "low=[%llu,%llu,%llu,%llu,%llu,%llu]\n",
+                 GasOp.isConstant() ? 1 : 0, ToAddrOp.isConstant() ? 1 : 0,
+                 ArgsOffsetOp.isConstant() ? 1 : 0,
+                 ArgsSizeOp.isConstant() ? 1 : 0,
+                 RetOffsetOp.isConstant() ? 1 : 0,
+                 RetSizeOp.isConstant() ? 1 : 0, low(GasOp), low(ToAddrOp),
+                 low(ArgsOffsetOp), low(ArgsSizeOp), low(RetOffsetOp),
+                 low(RetSizeOp));
+  }
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -4666,7 +4740,8 @@ EVMMirBuilder::handleStaticCall(Operand GasOp, Operand ToAddrOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemoryFull();
 #endif
-  auto Result = callRuntimeFor<uint64_t, uint64_t, const uint8_t *, uint64_t,
+  auto Result = callRuntimeFor<uint64_t, uint64_t, const intx::uint256 &,
+                               uint64_t,
                                uint64_t, uint64_t, uint64_t>(
       RuntimeFunctions.HandleStaticCall, GasOp, ToAddrOp, ArgsOffsetOp,
       ArgsSizeOp, RetOffsetOp, RetSizeOp);

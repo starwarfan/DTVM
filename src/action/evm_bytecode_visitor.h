@@ -12,6 +12,8 @@
 #include "runtime/evm_module.h"
 
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <type_traits>
 #include <utility>
@@ -99,6 +101,10 @@ private:
     }
   }
 
+  static bool liftedStackDebugEnabled() {
+    return std::getenv("DTVM_DEBUG_LIFTED_STACK") != nullptr;
+  }
+
   void spillTrackedStackPreservingPrefix(const std::vector<Operand> &Values,
                                          uint32_t PrefixDepth) {
     if constexpr (HasSpillTrackedStackPreservingPrefix<IRBuilder>::value) {
@@ -135,6 +141,14 @@ private:
   void requireLogicalStackDepth(uint32_t Depth) {
     if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
       return;
+    }
+    if (liftedStackDebugEnabled() && Stack.getSize() < Depth) {
+      std::fprintf(stderr,
+                   "[lifted-check] logical-underflow pc=%llu block=%llu "
+                   "required=%u logical=%u lifted=%d\n",
+                   static_cast<unsigned long long>(PC),
+                   static_cast<unsigned long long>(CurrentBlockEntryPC), Depth,
+                   Stack.getSize(), CurrentBlockLifted ? 1 : 0);
     }
     ZEN_ASSERT(Stack.getSize() >= Depth &&
                "Logical EVM stack must be preloaded at block entry");
@@ -188,6 +202,19 @@ private:
         }
         bool IsJumpDest = (Opcode == OP_JUMPDEST);
         if (!IsJumpDest) {
+          if (liftedStackDebugEnabled() &&
+              Ctx->getRevision() >= EVMC_TANGERINE_WHISTLE &&
+              isHelperSensitiveOpcode(Opcode)) {
+            const uint32_t RequiredDepth =
+                helperSensitiveOpcodePopDepth(Opcode);
+            std::fprintf(stderr,
+                         "[lifted-check] helper-op pc=%llu block=%llu op=%u "
+                         "required=%u logical=%u lifted=%d\n",
+                         static_cast<unsigned long long>(PC),
+                         static_cast<unsigned long long>(CurrentBlockEntryPC),
+                         static_cast<unsigned>(Opcode), RequiredDepth,
+                         Stack.getSize(), CurrentBlockLifted ? 1 : 0);
+          }
           if (!Builder.isOpcodeDefined(Opcode)) {
 #ifdef ZEN_ENABLE_JIT_FALLBACK_TEST
             // For testing purposes, we can use 0xEE as a FALLBACK trigger
@@ -1152,6 +1179,15 @@ private:
           static_cast<uint32_t>(std::max(BlockInfo.HiddenLiveInPrefixDepth, 0));
       materializeLiftedBlockMergeRequests(PC);
       restoreLiftedBlockLogicalEntryState(PC);
+      if (liftedStackDebugEnabled()) {
+        std::fprintf(stderr,
+                     "[lifted-check] begin lifted block=%llu entry_depth=%d "
+                     "full_entry=%d hidden_prefix=%u logical=%u\n",
+                     static_cast<unsigned long long>(PC),
+                     BlockInfo.ResolvedEntryStackDepth,
+                     BlockInfo.FullEntryStateDepth,
+                     CurrentBlockHiddenLiveInPrefixDepth, Stack.getSize());
+      }
       return;
     }
 
@@ -1165,6 +1201,13 @@ private:
     while (!ReverseStack.empty()) {
       Operand Opnd = ReverseStack.pop();
       Stack.push(Opnd);
+    }
+    if (liftedStackDebugEnabled()) {
+      std::fprintf(stderr,
+                   "[lifted-check] begin materialized block=%llu pop=%d "
+                   "logical=%u min_pop=%d\n",
+                   static_cast<unsigned long long>(PC), -BlockInfo.MinPopHeight,
+                   Stack.getSize(), BlockInfo.MinPopHeight);
     }
   }
 
@@ -1217,6 +1260,43 @@ private:
       return true;
     default:
       return false;
+    }
+  }
+
+  static uint32_t helperSensitiveOpcodePopDepth(evmc_opcode Opcode) {
+    switch (Opcode) {
+    case OP_LOG0:
+      return 2;
+    case OP_LOG1:
+      return 3;
+    case OP_LOG2:
+      return 4;
+    case OP_LOG3:
+      return 5;
+    case OP_LOG4:
+      return 6;
+    case OP_KECCAK256:
+      return 2;
+    case OP_CALLDATACOPY:
+      return 3;
+    case OP_CODECOPY:
+      return 3;
+    case OP_EXTCODECOPY:
+      return 4;
+    case OP_RETURNDATACOPY:
+      return 3;
+    case OP_CREATE:
+      return 3;
+    case OP_CALL:
+    case OP_CALLCODE:
+      return 7;
+    case OP_DELEGATECALL:
+    case OP_STATICCALL:
+      return 6;
+    case OP_CREATE2:
+      return 4;
+    default:
+      return 0;
     }
   }
 

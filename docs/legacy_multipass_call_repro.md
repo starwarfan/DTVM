@@ -38,3 +38,22 @@ In legacy revisions, stack lifting/logical-stack materialization can lose deep
 stack operands before CALL-family lowering executes. The frontend fix keeps
 legacy stack operations on the runtime EVM stack path, preserving CALL argument
 order/value at execution sites without interpreter fallback.
+
+## Frontend Test Semantics
+
+The regression test `LegacyRevisionDupSwapUseRuntimeStackPath` in
+`src/tests/evm_jit_frontend_tests.cpp` is intentionally behavioral:
+
+- It uses `EVMC_FRONTIER`.
+- It asserts `DUP2` and `SWAP1` perform runtime stack access
+  (`stackGet`/`stackSet`) in legacy mode.
+
+If legacy runtime-stack branches are disabled in the visitor, the same test
+fails with:
+
+- `DupStats.StackGetCount == 0`
+- `SwapStats.StackGetCount == 0`
+- `SwapStats.StackSetCount == 0`
+
+That failure confirms the test is not cosmetic; it directly guards the legacy
+operand provenance needed by CALL-family lowering.

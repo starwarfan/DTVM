@@ -8,12 +8,18 @@
 #include "host/evm/crypto.h"
 #include "runtime/evm_instance.h"
 #include "runtime/evm_module.h"
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <evmc/evmc.h>
 #include <vector>
 
 namespace {
+
+static bool liftedStackDebugEnabled() {
+  return std::getenv("DTVM_DEBUG_LIFTED_STACK") != nullptr;
+}
 
 static constexpr uint32_t KeccakCacheSlots = 16;
 static constexpr uint32_t KeccakCacheMaxInputLen = 128;
@@ -868,22 +874,37 @@ const uint8_t *evmHandleCreate2(zen::runtime::EVMInstance *Instance,
 // Helper function for all call types
 static uint64_t evmHandleCallInternal(
     zen::runtime::EVMInstance *Instance, evmc_call_kind CallKind, uint64_t Gas,
-    const uint8_t *ToAddr, const intx::uint256 &Value, uint64_t ArgsOffset,
+    const intx::uint256 &ToAddr, const intx::uint256 &Value, uint64_t ArgsOffset,
     uint64_t ArgsSize, uint64_t RetOffset, uint64_t RetSize, bool ForceStatic) {
   const zen::runtime::EVMModule *Module = Instance->getModule();
   ZEN_ASSERT(Module && Module->Host);
 
   const evmc_message *CurrentMsg = Instance->getCurrentMessage();
   ZEN_ASSERT(CurrentMsg && "No current message set in EVMInstance");
-  evmc::address TargetAddr =
-      ToAddr ? loadAddressFromLE(ToAddr) : evmc::address{};
+  const bool HasValueArgs = CallKind == EVMC_CALL || CallKind == EVMC_CALLCODE;
   evmc_revision Rev = Instance->getRevision();
+  evmc::address TargetAddr = intx::be::trunc<evmc::address>(ToAddr);
+  if (liftedStackDebugEnabled()) {
+    uint8_t value_raw[32];
+    intx::be::store(value_raw, Value);
+    std::fprintf(stderr,
+                 "[lifted-runtime] kind=%u rev=%d gas=%llu to=%02x%02x..%02x%02x "
+                 "value_low=%llu ao=%llu as=%llu ro=%llu rs=%llu\n",
+                 static_cast<unsigned>(CallKind), static_cast<int>(Rev),
+                 static_cast<unsigned long long>(Gas), TargetAddr.bytes[0],
+                 TargetAddr.bytes[1], TargetAddr.bytes[18],
+                 TargetAddr.bytes[19],
+                 static_cast<unsigned long long>(value_raw[31]),
+                 static_cast<unsigned long long>(ArgsOffset),
+                 static_cast<unsigned long long>(ArgsSize),
+                 static_cast<unsigned long long>(RetOffset),
+                 static_cast<unsigned long long>(RetSize));
+  }
   if (Rev >= EVMC_BERLIN &&
       Module->Host->access_account(TargetAddr) == EVMC_ACCESS_COLD) {
     Instance->chargeGas(zen::evm::ADDITIONAL_COLD_ACCOUNT_ACCESS_COST);
   }
 
-  const bool HasValueArgs = CallKind == EVMC_CALL || CallKind == EVMC_CALLCODE;
   const bool HasValue = Value != 0;
 
   if (CallKind == EVMC_CALL && HasValue && Instance->isStaticMode()) {
@@ -1019,7 +1040,8 @@ static uint64_t evmHandleCallInternal(
 }
 
 uint64_t evmHandleCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
-                       const uint8_t *ToAddr, const intx::uint256 &Value,
+                       const intx::uint256 &ToAddr,
+                       const intx::uint256 &Value,
                        uint64_t ArgsOffset, uint64_t ArgsSize,
                        uint64_t RetOffset, uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_CALL, Gas, ToAddr, Value,
@@ -1027,7 +1049,8 @@ uint64_t evmHandleCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
 }
 
 uint64_t evmHandleCallCode(zen::runtime::EVMInstance *Instance, uint64_t Gas,
-                           const uint8_t *ToAddr, const intx::uint256 &Value,
+                           const intx::uint256 &ToAddr,
+                           const intx::uint256 &Value,
                            uint64_t ArgsOffset, uint64_t ArgsSize,
                            uint64_t RetOffset, uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_CALLCODE, Gas, ToAddr, Value,
@@ -1059,7 +1082,7 @@ void evmHandleUndefined(zen::runtime::EVMInstance *Instance) {
 }
 
 uint64_t evmHandleDelegateCall(zen::runtime::EVMInstance *Instance,
-                               uint64_t Gas, const uint8_t *ToAddr,
+                               uint64_t Gas, const intx::uint256 &ToAddr,
                                uint64_t ArgsOffset, uint64_t ArgsSize,
                                uint64_t RetOffset, uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_DELEGATECALL, Gas, ToAddr,
@@ -1068,7 +1091,7 @@ uint64_t evmHandleDelegateCall(zen::runtime::EVMInstance *Instance,
 }
 
 uint64_t evmHandleStaticCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
-                             const uint8_t *ToAddr, uint64_t ArgsOffset,
+                             const intx::uint256 &ToAddr, uint64_t ArgsOffset,
                              uint64_t ArgsSize, uint64_t RetOffset,
                              uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_CALL, Gas, ToAddr,
