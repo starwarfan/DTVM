@@ -124,14 +124,28 @@ private:
     }
   }
 
-  void push(const Operand &Opnd) { Stack.push(Opnd); }
+  void push(const Operand &Opnd) {
+    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
+      Builder.stackPush(Opnd);
+      return;
+    }
+    Stack.push(Opnd);
+  }
 
   void requireLogicalStackDepth(uint32_t Depth) {
+    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
+      return;
+    }
     ZEN_ASSERT(Stack.getSize() >= Depth &&
                "Logical EVM stack must be preloaded at block entry");
   }
 
   Operand pop() {
+    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
+      Operand Opnd = Builder.stackPop();
+      Builder.releaseOperand(Opnd);
+      return Opnd;
+    }
     requireLogicalStackDepth(1);
     Operand Opnd = Stack.pop();
     Builder.releaseOperand(Opnd);
@@ -1127,6 +1141,10 @@ private:
       Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
                                     1024 - BlockInfo.MaxStackHeight);
     }
+    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
+      CurrentBlockLifted = false;
+      return;
+    }
 
     if (LiftedBlock) {
       CurrentBlockLifted = true;
@@ -1776,8 +1794,17 @@ private:
 
   // DUP1-DUP16: Duplicate Nth stack item
   void handleDup(uint8_t Index) {
-    requireLogicalStackDepth(Index);
-    Operand Result = Stack.peek(Index - 1);
+    Operand Result;
+    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE &&
+        Stack.getSize() < static_cast<uint32_t>(Index)) {
+      const int32_t MemIndex =
+          static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize()) -
+          1;
+      Result = Builder.stackGet(MemIndex);
+    } else {
+      requireLogicalStackDepth(Index);
+      Result = Stack.peek(Index - 1);
+    }
     push(Result);
   }
 
@@ -1789,6 +1816,27 @@ private:
 
   // SWAP1-SWAP16: Swap top with Nth+1 stack item
   void handleSwap(uint8_t Index) {
+    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
+      const uint32_t RequiredDepth = static_cast<uint32_t>(Index) + 1u;
+      if (Stack.empty()) {
+        const int32_t MemIndex =
+            static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize());
+        Operand A = Builder.stackGet(0);
+        Operand B = Builder.stackGet(MemIndex);
+        Builder.stackSet(0, B);
+        Builder.stackSet(MemIndex, A);
+        return;
+      }
+      if (Stack.getSize() < RequiredDepth) {
+        const int32_t MemIndex =
+            static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize());
+        Operand &A = Stack.peek(0);
+        Operand B = Builder.stackGet(MemIndex);
+        Builder.stackSet(MemIndex, A);
+        A = B;
+        return;
+      }
+    }
     requireLogicalStackDepth(static_cast<uint32_t>(Index) + 1u);
     std::swap(Stack.peek(0), Stack.peek(Index));
   }

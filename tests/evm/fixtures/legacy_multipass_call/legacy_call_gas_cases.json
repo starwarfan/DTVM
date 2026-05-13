@@ -1,0 +1,24 @@
+{
+  "description": "Legacy CALL gas regression cases captured from silkworm run_single_tx replay.",
+  "revision_guard": "pre-Tangerine Whistle path in multipass frontend",
+  "cases": [
+    {
+      "name": "legacy_call_creation_cost_block_254277_tx0",
+      "block": 254277,
+      "tx_index": 0,
+      "tx_hash": "0x65ee2777a2c5abbd266dbbcb68a02eab73eef913d7106bc9b7cfc2cbabc883d7",
+      "expected_tx_gas": 57956,
+      "expected_status": "success",
+      "notes": "Regression case: legacy CALL args became zero in multipass and skipped ACCOUNT_CREATION_COST."
+    },
+    {
+      "name": "legacy_guard_block_254297_tx0",
+      "block": 254297,
+      "tx_index": 0,
+      "tx_hash": "0x342b28ad3b4a91f747274a1d241c5978a2ccd50f0124eb1423a4dd55783eaa99",
+      "expected_tx_gas": 94849,
+      "expected_status": "success",
+      "notes": "Guard case to prevent regressions while fixing legacy CALL argument materialization."
+    }
+  ]
+}
