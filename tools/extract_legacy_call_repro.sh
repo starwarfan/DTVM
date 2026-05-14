@@ -20,12 +20,16 @@ mkdir -p "${OUT_DIR}"
 python3 - "${OUT_DIR}" "${RPC_URL}" <<'PY'
 import json
 import sys
-from typing import Dict, Any, Set
+from typing import Dict, Any, Set, Optional
 import requests
 import time
+import subprocess
+import re
+import os
 
 out_dir = sys.argv[1]
 rpc_url = sys.argv[2]
+staged_pipeline_bin = os.environ.get("SILKWORM_STAGED_PIPELINE_BIN", "")
 
 CASES = [
     {
@@ -34,6 +38,7 @@ CASES = [
         "fixture_name": "block_254277_tx_0.json",
         "case_name": "legacy_call_creation_cost_block_254277_tx0",
         "expected_tx_gas": 57956,
+        "silkworm_datadir_env": "SILKWORM_DATADIR_254277",
     },
     {
         "block": 254297,
@@ -41,6 +46,7 @@ CASES = [
         "fixture_name": "block_254297_tx_0.json",
         "case_name": "legacy_guard_block_254297_tx0",
         "expected_tx_gas": 94849,
+        "silkworm_datadir_env": "SILKWORM_DATADIR_254297",
     },
 ]
 
@@ -72,6 +78,48 @@ def rpc_call_or_default(method: str, params, default):
         return rpc_call(method, params)
     except Exception:
         return default
+
+
+def query_account_at(datadir: str, block_number: int, address: str) -> Optional[Dict[str, Any]]:
+    if not staged_pipeline_bin or not datadir:
+        return None
+    cmd = [
+        staged_pipeline_bin,
+        "--datadir",
+        datadir,
+        "--exclusive",
+        "account_at",
+        "--block",
+        str(block_number),
+        "--address",
+        address,
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+    line = ""
+    merged = proc.stdout + "\n" + proc.stderr
+    for l in merged.splitlines():
+        if "[account-at]" in l:
+            line = l
+            break
+    if not line:
+        return None
+    exists_m = re.search(r"exists=(true|false)", line)
+    nonce_m = re.search(r"nonce=([0-9]+)", line)
+    bal_m = re.search(r"balance=([0-9]+)", line)
+    if not exists_m or not nonce_m or not bal_m:
+        return None
+    exists = exists_m.group(1) == "true"
+    nonce = int(nonce_m.group(1)) if exists else 0
+    balance = int(bal_m.group(1)) if exists else 0
+    return {"exists": exists, "nonce": nonce, "balance": balance}
 
 
 def h2i(h: str) -> int:
@@ -136,11 +184,65 @@ def collect_trace_addresses(trace_entries) -> Set[str]:
     return addrs
 
 
+def normalized_slot_key(raw: str) -> str:
+    v = raw[2:] if raw.startswith("0x") else raw
+    return "0x" + v.rjust(64, "0").lower()
+
+
+def collect_storage_keys_from_vmtrace(vm_trace: Dict[str, Any]) -> Set[str]:
+    if not isinstance(vm_trace, dict):
+        return set()
+    ops = vm_trace.get("ops", [])
+    keys: Set[str] = set()
+    for i, op in enumerate(ops):
+        name = op.get("op")
+        if name not in ("SLOAD", "SSTORE") or i == 0:
+            continue
+        prev_push = ops[i - 1].get("ex", {}).get("push")
+        if not isinstance(prev_push, list) or not prev_push:
+            continue
+        # vmTrace exposes stack-like values in prev ex.push. The top-of-stack
+        # is the last element. For SLOAD/SSTORE, the slot key is stack top.
+        candidate = prev_push[-1]
+        if isinstance(candidate, str) and candidate.startswith("0x"):
+            keys.add(normalized_slot_key(candidate))
+    return keys
+
+
+def collect_frame_storage_keys(vm_trace: Dict[str, Any]) -> Set[str]:
+    if not isinstance(vm_trace, dict):
+        return set()
+    ops = vm_trace.get("ops", [])
+    keys: Set[str] = set()
+    for i, op in enumerate(ops):
+        name = op.get("op")
+        if name not in ("SLOAD", "SSTORE") or i == 0:
+            continue
+        prev_push = ops[i - 1].get("ex", {}).get("push")
+        if not isinstance(prev_push, list) or not prev_push:
+            continue
+        candidate = prev_push[-1]
+        if isinstance(candidate, str) and candidate.startswith("0x"):
+            keys.add(normalized_slot_key(candidate))
+    return keys
+
+
+def walk_vmtrace_frames(vm_trace: Dict[str, Any]):
+    if not isinstance(vm_trace, dict):
+        return
+    yield vm_trace
+    for op in vm_trace.get("ops", []):
+        sub = op.get("sub")
+        if isinstance(sub, dict):
+            yield from walk_vmtrace_frames(sub)
+
+
 for case in CASES:
     block_number = case["block"]
     tx_index = case["tx_index"]
     block_tag = hex(block_number)
     prev_block_tag = hex(block_number - 1)
+    silkworm_datadir = os.environ.get(case["silkworm_datadir_env"], "")
 
     block = rpc_call("eth_getBlockByNumber", [block_tag, True])
     if block is None:
@@ -154,11 +256,12 @@ for case in CASES:
     receipt = rpc_call("eth_getTransactionReceipt", [tx_hash])
     replay = rpc_call(
         "trace_replayBlockTransactions",
-        [block_tag, ["stateDiff", "trace"]],
+        [block_tag, ["stateDiff", "trace", "vmTrace"]],
     )
     tx_replay = replay[tx_index]
     state_diff = tx_replay.get("stateDiff", {})
     trace_entries = tx_replay.get("trace", [])
+    vm_trace = tx_replay.get("vmTrace", {})
 
     addresses: Set[str] = set()
     addresses.add(normalize_addr(tx["from"]))
@@ -177,10 +280,17 @@ for case in CASES:
 
     prestate: Dict[str, Any] = {}
     for addr in sorted(addresses):
-        balance = rpc_call_or_default("eth_getBalance", [addr, prev_block_tag], "0x0")
-        nonce = rpc_call_or_default(
-            "eth_getTransactionCount", [addr, prev_block_tag], "0x0"
-        )
+        account_at = query_account_at(silkworm_datadir, block_number - 1, addr)
+        if account_at is not None:
+            balance_int = account_at["balance"]
+            nonce_int = account_at["nonce"]
+            balance = hex(balance_int)
+            nonce = hex(nonce_int)
+        else:
+            balance = rpc_call_or_default("eth_getBalance", [addr, prev_block_tag], "0x0")
+            nonce = rpc_call_or_default(
+                "eth_getTransactionCount", [addr, prev_block_tag], "0x0"
+            )
         code = rpc_call_or_default("eth_getCode", [addr, prev_block_tag], "0x")
         prestate[addr] = {
             "balance": to_hex_u256(h2i(balance)),
@@ -207,13 +317,58 @@ for case in CASES:
             }
         for key, value_diff in storage_diff.items():
             slot = key.lower()
-            if not slot.startswith("0x"):
-                slot = "0x" + slot
+            slot = normalized_slot_key(slot)
             prestate[addr]["storage"][slot] = extract_storage_value_from_diff(value_diff)
+
+    # Add read-set storage slots observed in vmTrace for the top-level recipient.
+    if tx.get("to"):
+        to_addr = normalize_addr(tx["to"])
+        read_keys = collect_storage_keys_from_vmtrace(vm_trace)
+        for slot in sorted(read_keys):
+            if slot in prestate[to_addr]["storage"]:
+                continue
+            value = rpc_call_or_default(
+                "eth_getStorageAt", [to_addr, slot, prev_block_tag], "0x0"
+            )
+            prestate[to_addr]["storage"][slot] = normalized_slot_key(value)
+
+    # Improve slot ownership by mapping vmTrace frame code -> account address.
+    # This captures storage reads/writes of internal call frames.
+    code_to_addrs: Dict[str, Set[str]] = {}
+    for addr in sorted(prestate.keys()):
+        code_hex = prestate[addr]["code"]
+        code_to_addrs.setdefault(code_hex, set()).add(addr)
+
+    for frame in walk_vmtrace_frames(vm_trace):
+        frame_code = frame.get("code")
+        if not isinstance(frame_code, str) or frame_code == "0x":
+            continue
+        owners = code_to_addrs.get(frame_code.lower(), set())
+        if not owners:
+            continue
+        frame_keys = collect_frame_storage_keys(frame)
+        if not frame_keys:
+            continue
+        for owner_addr in owners:
+            for slot in sorted(frame_keys):
+                if slot in prestate[owner_addr]["storage"]:
+                    continue
+                value = rpc_call_or_default(
+                    "eth_getStorageAt", [owner_addr, slot, prev_block_tag], "0x0"
+                )
+                prestate[owner_addr]["storage"][slot] = normalized_slot_key(value)
 
     block_base_fee = block.get("baseFeePerGas", "0x0")
     block_prev_randao = block.get("mixHash", "0x0")
     block_prev_randao = to_hex_u256(h2i(block_prev_randao))
+    parent_block = rpc_call("eth_getBlockByNumber", [hex(block_number - 1), False])
+    parent_hash = parent_block["hash"].lower()
+    block_hashes: Dict[str, str] = {}
+    start = max(0, block_number - 256)
+    for bn in range(start, block_number):
+        b = rpc_call_or_default("eth_getBlockByNumber", [hex(bn), False], None)
+        if isinstance(b, dict) and b.get("hash"):
+            block_hashes[str(bn)] = b["hash"].lower()
 
     tx_gas_used = h2i(receipt["gasUsed"])
     if tx_gas_used != case["expected_tx_gas"]:
@@ -247,6 +402,8 @@ for case in CASES:
             "block_gas_limit": h2i(block["gasLimit"]),
             "block_base_fee": block_base_fee.lower(),
             "tx_origin": normalize_addr(tx["from"]),
+            "block_hash": parent_hash,
+            "block_hashes": block_hashes,
         },
         "prestate": prestate,
         "expected": {
