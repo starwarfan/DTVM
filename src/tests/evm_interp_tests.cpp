@@ -143,6 +143,8 @@ struct EVMExecutionResult {
   evmc_status_code Status = EVMC_INTERNAL_ERROR;
   std::string OutputHex;
   bool JITCompiled = false;
+  uint64_t GasUsed = 0;
+  int64_t GasLeft = 0;
 };
 
 EVMExecutionResult executeEvmBytecodeFile(const std::string &FilePath,
@@ -228,6 +230,97 @@ EVMExecutionResult executeEvmBytecodeFile(const std::string &FilePath,
   Exec.Status = RawResult.status_code;
   Exec.OutputHex =
       zen::utils::toHex(RawResult.output_data, RawResult.output_size);
+  Exec.GasLeft = RawResult.gas_left;
+  if (RawResult.gas_left >= 0 &&
+      static_cast<uint64_t>(RawResult.gas_left) <= ExecutionGasLimit) {
+    Exec.GasUsed = ExecutionGasLimit - static_cast<uint64_t>(RawResult.gas_left);
+  }
+  return Exec;
+}
+
+EVMExecutionResult executeInlineBytecodeWithState(const std::vector<uint8_t> &Bytecode,
+                                                  common::RunMode Mode,
+                                                  evmc_revision Revision,
+                                                  bool TargetExists) {
+  EVMExecutionResult Empty;
+  RuntimeConfig Config;
+  Config.Mode = Mode;
+
+  auto MockedHost = std::make_unique<zen::evm::ZenMockedEVMHost>();
+  MockedHost->tx_context.tx_origin = zen::evm::DEFAULT_DEPLOYER_ADDRESS;
+  auto RT = Runtime::newEVMRuntime(Config, MockedHost.get());
+  EXPECT_TRUE(RT != nullptr) << "Failed to create runtime";
+  if (!RT) {
+    return Empty;
+  }
+  MockedHost->setRuntime(RT.get());
+
+  if (TargetExists) {
+    evmc::address TargetAddr{};
+    TargetAddr.bytes[19] = 0xbb;
+    evmc::MockedAccount Account{};
+    Account.nonce = 1;
+    Account.codehash = zen::evm::EMPTY_CODE_HASH;
+    MockedHost->accounts[TargetAddr] = Account;
+  }
+
+  auto ModRet =
+      RT->loadEVMModule("legacy_call_state_regression", Bytecode.data(),
+                        Bytecode.size());
+  EXPECT_TRUE(ModRet) << "Failed to load inline module";
+  if (!ModRet) {
+    return Empty;
+  }
+  EVMModule *Mod = *ModRet;
+
+  Isolation *Iso = RT->createManagedIsolation();
+  EXPECT_TRUE(Iso != nullptr) << "Failed to create isolation";
+  if (!Iso) {
+    return Empty;
+  }
+
+  const uint64_t GasLimit = 500000;
+  const uint64_t IntrinsicGas = zen::evm::BASIC_EXECUTION_COST;
+  const uint64_t ExecutionGasLimit = GasLimit - IntrinsicGas;
+
+  auto InstRet = Iso->createEVMInstance(*Mod, ExecutionGasLimit);
+  EXPECT_TRUE(InstRet) << "Failed to create instance";
+  if (!InstRet) {
+    return Empty;
+  }
+  EVMInstance *Inst = *InstRet;
+  Inst->setRevision(Revision);
+
+  evmc_message Msg = {
+      .kind = EVMC_CALL,
+      .flags = 0u,
+      .depth = 0,
+      .gas = static_cast<int64_t>(ExecutionGasLimit),
+      .recipient = {},
+      .sender = zen::evm::DEFAULT_DEPLOYER_ADDRESS,
+      .input_data = nullptr,
+      .input_size = 0,
+      .value = {},
+      .create2_salt = {},
+      .code_address = {},
+      .code = reinterpret_cast<const uint8_t *>(Mod->Code),
+      .code_size = Mod->CodeSize,
+  };
+
+  evmc::Result RawResult;
+  EVMExecutionResult Exec;
+#ifdef ZEN_ENABLE_JIT
+  Exec.JITCompiled = Mod->getJITCode() != nullptr && Mod->getJITCodeSize() > 0;
+#endif
+  EXPECT_NO_THROW({ RT->callEVMMain(*Inst, Msg, RawResult); });
+  Exec.Status = RawResult.status_code;
+  Exec.OutputHex =
+      zen::utils::toHex(RawResult.output_data, RawResult.output_size);
+  Exec.GasLeft = RawResult.gas_left;
+  if (RawResult.gas_left >= 0 &&
+      static_cast<uint64_t>(RawResult.gas_left) <= ExecutionGasLimit) {
+    Exec.GasUsed = ExecutionGasLimit - static_cast<uint64_t>(RawResult.gas_left);
+  }
   return Exec;
 }
 
@@ -395,5 +488,77 @@ TEST(EVMMultipassLinearPrecheckTest, MemoryLinearMstoreStepUsesNonZeroStride) {
   EXPECT_EQ(Exec.Status, EVMC_SUCCESS);
   EXPECT_EQ(Exec.OutputHex,
             "0000000000000000000000000000000000000000000000000000000000000080");
+}
+
+TEST(EVMStateRegressionTest, CallAccountCreationCostMatchesRevisionAcrossModes) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PUSH1 0xaa
+      0x60, 0xbb, // PUSH1 0xbb
+      0x60, 0x00, // PUSH1 0x00
+      0x35,       // CALLDATALOAD
+      0x60, 0x0f, // PUSH1 0x0f (jumpdest)
+      0x57,       // JUMPI
+      0x60, 0xcc, // PUSH1 0xcc
+      0x60, 0x0f, // PUSH1 0x0f
+      0x56,       // JUMP
+      0x5b,       // JUMPDEST
+      0x60, 0x00, // PUSH1 retSize
+      0x60, 0x00, // PUSH1 retOffset
+      0x60, 0x00, // PUSH1 argsSize
+      0x60, 0x00, // PUSH1 argsOffset
+      0x60, 0x00, // PUSH1 value
+      0x86,       // DUP7 (to-address -> 0xbb on runtime path)
+      0x90,       // SWAP1
+      0x90,       // SWAP1
+      0x60, 0x20, // PUSH1 gas
+      0xf1,       // CALL
+      0x00        // STOP
+  };
+
+  struct RevisionCase {
+    evmc_revision Revision;
+    uint64_t ExpectedCreationDelta;
+  };
+  const RevisionCase Cases[] = {
+      {EVMC_FRONTIER, 25000},
+      {EVMC_TANGERINE_WHISTLE, 25000},
+      {EVMC_CANCUN, 0},
+  };
+
+  for (const auto &Case : Cases) {
+    auto InterpMissing =
+        executeInlineBytecodeWithState(Bytecode, common::RunMode::InterpMode,
+                                       Case.Revision, false);
+    auto InterpExisting =
+        executeInlineBytecodeWithState(Bytecode, common::RunMode::InterpMode,
+                                       Case.Revision, true);
+    auto MpMissing =
+        executeInlineBytecodeWithState(Bytecode, common::RunMode::MultipassMode,
+                                       Case.Revision, false);
+    auto MpExisting =
+        executeInlineBytecodeWithState(Bytecode, common::RunMode::MultipassMode,
+                                       Case.Revision, true);
+
+    EXPECT_EQ(InterpMissing.Status, EVMC_SUCCESS);
+    EXPECT_EQ(InterpExisting.Status, EVMC_SUCCESS);
+    EXPECT_EQ(MpMissing.Status, EVMC_SUCCESS);
+    EXPECT_EQ(MpExisting.Status, EVMC_SUCCESS);
+
+    ASSERT_GE(InterpMissing.GasUsed, InterpExisting.GasUsed);
+    ASSERT_GE(MpMissing.GasUsed, MpExisting.GasUsed);
+
+    const uint64_t InterpDelta = InterpMissing.GasUsed - InterpExisting.GasUsed;
+    const uint64_t MpDelta = MpMissing.GasUsed - MpExisting.GasUsed;
+
+    EXPECT_EQ(InterpDelta, Case.ExpectedCreationDelta)
+        << "unexpected creation-cost delta for revision "
+        << static_cast<int>(Case.Revision);
+    EXPECT_EQ(MpDelta, Case.ExpectedCreationDelta)
+        << "unexpected multipass creation-cost delta for revision "
+        << static_cast<int>(Case.Revision);
+    EXPECT_EQ(InterpDelta, MpDelta)
+        << "interpreter/multipass creation-cost delta mismatch for revision "
+        << static_cast<int>(Case.Revision);
+  }
 }
 #endif
