@@ -1,0 +1,13 @@
+{
+  "description": "Standalone legacy CALL repro fixtures.",
+  "cases": [
+    {
+      "name": "legacy_call_creation_cost_block_254277_tx0",
+      "fixture": "block_254277_tx_0.json"
+    },
+    {
+      "name": "legacy_guard_block_254297_tx0",
+      "fixture": "block_254297_tx_0.json"
+    }
+  ]
+}

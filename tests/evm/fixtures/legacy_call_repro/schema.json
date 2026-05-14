@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DTVM Legacy CALL Repro Fixture",
+  "type": "object",
+  "required": [
+    "case_name",
+    "chain_id",
+    "block_number",
+    "tx_index",
+    "tx_hash",
+    "revision",
+    "tx",
+    "env",
+    "prestate",
+    "expected"
+  ],
+  "properties": {
+    "case_name": {
+      "type": "string"
+    },
+    "chain_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "block_number": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tx_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tx_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "revision": {
+      "type": "string"
+    },
+    "tx": {
+      "type": "object",
+      "required": [
+        "kind",
+        "from",
+        "to",
+        "nonce",
+        "gas_limit",
+        "gas_price",
+        "value",
+        "input"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "call"
+          ]
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "nonce": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gas_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gas_price": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]+$"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]+$"
+        },
+        "input": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]*$"
+        }
+      }
+    },
+    "env": {
+      "type": "object",
+      "required": [
+        "block_number",
+        "block_timestamp",
+        "block_coinbase",
+        "block_prev_randao",
+        "block_gas_limit",
+        "block_base_fee",
+        "tx_origin"
+      ],
+      "properties": {
+        "block_number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "block_timestamp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "block_coinbase": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "block_prev_randao": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{64}$"
+        },
+        "block_gas_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "block_base_fee": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]+$"
+        },
+        "tx_origin": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        }
+      }
+    },
+    "prestate": {
+      "type": "object",
+      "patternProperties": {
+        "^0x[0-9a-fA-F]{40}$": {
+          "type": "object",
+          "required": [
+            "balance",
+            "nonce",
+            "code",
+            "storage"
+          ],
+          "properties": {
+            "balance": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]+$"
+            },
+            "nonce": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]*$"
+            },
+            "storage": {
+              "type": "object",
+              "patternProperties": {
+                "^0x[0-9a-fA-F]{64}$": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{64}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "required": [
+        "status",
+        "tx_gas"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "success",
+            "revert",
+            "failure"
+          ]
+        },
+        "tx_gas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dtvm_interpreter_gas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dtvm_multipass_gas": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
