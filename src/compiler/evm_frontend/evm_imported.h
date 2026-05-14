@@ -71,10 +71,10 @@ using Create2Fn = const uint8_t *(*)(zen::runtime::EVMInstance *,
 
 // Call function types for different call operations
 using CallFn = uint64_t (*)(zen::runtime::EVMInstance *, uint64_t,
-                            const uint8_t *, const intx::uint256 &, uint64_t,
+                            const intx::uint256 &, const intx::uint256 &, uint64_t,
                             uint64_t, uint64_t, uint64_t); // CALL, CALLCODE
 using DelegateCallFn = uint64_t (*)(zen::runtime::EVMInstance *, uint64_t,
-                                    const uint8_t *, uint64_t, uint64_t,
+                                    const intx::uint256 &, uint64_t, uint64_t,
                                     uint64_t,
                                     uint64_t); // DELEGATECALL, STATICCALL
 
@@ -233,21 +233,21 @@ const uint8_t *evmHandleCreate2(zen::runtime::EVMInstance *Instance,
                                 const intx::uint256 &Value, uint64_t Offset,
                                 uint64_t Size, const uint8_t *Salt);
 uint64_t evmHandleCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
-                       const uint8_t *ToAddr, const intx::uint256 &Value,
+                       const intx::uint256 &ToAddr, const intx::uint256 &Value,
                        uint64_t ArgsOffset, uint64_t ArgsSize,
                        uint64_t RetOffset, uint64_t RetSize);
 uint64_t evmHandleCallCode(zen::runtime::EVMInstance *Instance, uint64_t Gas,
-                           const uint8_t *ToAddr, const intx::uint256 &Value,
+                           const intx::uint256 &ToAddr, const intx::uint256 &Value,
                            uint64_t ArgsOffset, uint64_t ArgsSize,
                            uint64_t RetOffset, uint64_t RetSize);
 void evmSetReturn(zen::runtime::EVMInstance *Instance, uint64_t MemOffset,
                   uint64_t Length);
 uint64_t evmHandleDelegateCall(zen::runtime::EVMInstance *Instance,
-                               uint64_t Gas, const uint8_t *ToAddr,
+                               uint64_t Gas, const intx::uint256 &ToAddr,
                                uint64_t ArgsOffset, uint64_t ArgsSize,
                                uint64_t RetOffset, uint64_t RetSize);
 uint64_t evmHandleStaticCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
-                             const uint8_t *ToAddr, uint64_t ArgsOffset,
+                             const intx::uint256 &ToAddr, uint64_t ArgsOffset,
                              uint64_t ArgsSize, uint64_t RetOffset,
                              uint64_t RetSize);
 void evmSetRevert(zen::runtime::EVMInstance *Instance, uint64_t Offset,

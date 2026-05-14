@@ -690,7 +690,7 @@ TEST(EVMJITFrontendVisitorTest,
   EXPECT_FALSE(Builder.Undefined);
 }
 
-TEST(EVMJITFrontendVisitorTest, LegacyRevisionDupSwapUseRuntimeStackPath) {
+TEST(EVMJITFrontendVisitorTest, LegacyRevisionDupSwapPreservesOperandOrder) {
   const std::vector<uint8_t> Bytecode = {
       0x60, 0xaa, // PUSH1 0xaa
       0x60, 0xbb, // PUSH1 0xbb
@@ -710,15 +710,71 @@ TEST(EVMJITFrontendVisitorTest, LegacyRevisionDupSwapUseRuntimeStackPath) {
   EXPECT_TRUE(Visitor.compile());
   EXPECT_FALSE(Builder.Trapped);
   EXPECT_FALSE(Builder.Undefined);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
+  EXPECT_EQ(Builder.topStackValue()[0], 0xaaU);
 
   const auto &DupStats = Builder.accessStats(OP_DUP2);
   EXPECT_EQ(DupStats.StackPopCount, 0U);
-  EXPECT_GT(DupStats.StackGetCount, 0U);
+  EXPECT_EQ(DupStats.StackGetCount, 0U);
 
   const auto &SwapStats = Builder.accessStats(OP_SWAP1);
   EXPECT_EQ(SwapStats.StackPopCount, 0U);
-  EXPECT_GT(SwapStats.StackGetCount, 0U);
-  EXPECT_GT(SwapStats.StackSetCount, 0U);
+  EXPECT_EQ(SwapStats.StackGetCount, 0U);
+  EXPECT_EQ(SwapStats.StackSetCount, 0U);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     LowRevisionMaterializedMergePreservesCallOperandsAfterDeepDupSwap) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PUSH1 0xaa
+      0x60, 0xbb, // PUSH1 0xbb
+      0x60, 0x00, // PUSH1 0x00
+      0x35,       // CALLDATALOAD
+      0x60, 0x0f, // PUSH1 target
+      0x57,       // JUMPI
+      0x60, 0xcc, // PUSH1 0xcc
+      0x60, 0x0f, // PUSH1 target
+      0x56,       // JUMP
+      0x5b,       // JUMPDEST
+      0x60, 0x00, // PUSH1 retSize
+      0x60, 0x00, // PUSH1 retOffset
+      0x60, 0x00, // PUSH1 argsSize
+      0x60, 0x00, // PUSH1 argsOffset
+      0x60, 0x00, // PUSH1 value
+      0x86,       // DUP7 (duplicate deep merged value as to-address)
+      0x90,       // SWAP1
+      0x90,       // SWAP1
+      0x60, 0x20, // PUSH1 gas
+      0xf1,       // CALL
+      0x00        // STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *TargetBlock = findBlock(Analyzer, 15);
+  ASSERT_NE(TargetBlock, nullptr);
+  EXPECT_FALSE(TargetBlock->CanLiftStack);
+  EXPECT_EQ(TargetBlock->ResolvedEntryStackDepth, -1);
+  EXPECT_TRUE(TargetBlock->HasInconsistentEntryDepth);
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_FRONTIER);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+  ASSERT_TRUE(Builder.hasLastCallArgs());
+  EXPECT_EQ(Builder.callCount(), 1U);
+  EXPECT_EQ(Builder.lastCallArg(0)[0], 0x20U); // gas
+  EXPECT_EQ(Builder.lastCallArg(1)[0], 0xbbU); // to
+  EXPECT_EQ(Builder.lastCallArg(2)[0], 0x0U);  // value
+  EXPECT_EQ(Builder.lastCallArg(3)[0], 0x0U);  // args offset
+  EXPECT_EQ(Builder.lastCallArg(4)[0], 0x0U);  // args size
+  EXPECT_EQ(Builder.lastCallArg(5)[0], 0x0U);  // ret offset
+  EXPECT_EQ(Builder.lastCallArg(6)[0], 0x0U);  // ret size
 }
 
 TEST(EVMJITFrontendVisitorTest,

@@ -11,6 +11,7 @@
 #include "runtime/evm_instance.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstdio>
 
 thread_local zen::evm::EVMFrame *zen::evm::EVMResource::CurrentFrame = nullptr;
@@ -26,6 +27,10 @@ using namespace zen::runtime;
 namespace {
 
 bool chargeGas(EVMFrame *Frame, uint64_t GasCost);
+
+bool callProvenanceDebugEnabled() {
+  return std::getenv("DTVM_DEBUG_CALL_PROVENANCE") != nullptr;
+}
 
 evmc_revision currentRevision() {
   auto *Context = EVMResource::getInterpreterExecContext();
@@ -1278,6 +1283,16 @@ void CallHandler::doExecute() {
   const auto OutputSize = Frame->pop();
 
   const bool HasValue = Value != 0;
+  if (callProvenanceDebugEnabled()) {
+    std::fprintf(stderr,
+                 "[call-provenance][interp] rev=%d opcode=%u "
+                 "dest=%02x%02x..%02x%02x value_low=%llu gas_low=%llu\n",
+                 static_cast<int>(currentRevision()),
+                 static_cast<unsigned>(OpCode), Dest.bytes[0], Dest.bytes[1],
+                 Dest.bytes[18], Dest.bytes[19],
+                 static_cast<unsigned long long>(static_cast<uint64_t>(Value)),
+                 static_cast<unsigned long long>(static_cast<uint64_t>(Gas)));
+  }
 
   // Assume failure
   EVM_REQUIRE_STACK_SPACE(Frame, 1);
@@ -1340,7 +1355,15 @@ void CallHandler::doExecute() {
     uint64_t GasCost = HasValue ? CALL_VALUE_COST : 0;
     if (CallKind == EVMC_CALL) {
       if (HasValue || Rev < EVMC_SPURIOUS_DRAGON) {
-        if (!Frame->Host->account_exists(Dest)) {
+        const bool DestExists = Frame->Host->account_exists(Dest);
+        if (callProvenanceDebugEnabled()) {
+          std::fprintf(stderr,
+                       "[call-provenance][interp] rev=%d callkind=%u "
+                       "dest_exists=%d has_value=%d\n",
+                       static_cast<int>(Rev), static_cast<unsigned>(CallKind),
+                       DestExists ? 1 : 0, HasValue ? 1 : 0);
+        }
+        if (!DestExists) {
           GasCost += ACCOUNT_CREATION_COST;
         }
       }

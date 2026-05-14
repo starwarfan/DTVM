@@ -35,25 +35,20 @@ env SILKWORM_EVM=./libdtvmapi.so,mode=multipass DTVM_EVM_DISABLE_MULTIPASS_GREED
 ## Root-Cause Direction
 
 In legacy revisions, stack lifting/logical-stack materialization can lose deep
-stack operands before CALL-family lowering executes. The frontend fix keeps
-legacy stack operations on the runtime EVM stack path, preserving CALL argument
-order/value at execution sites without interpreter fallback.
+stack operands before CALL-family lowering executes. The frontend fix preserves
+CALL operand provenance while keeping logical stack enabled across revisions,
+including low revisions.
 
 ## Frontend Test Semantics
 
-The regression test `LegacyRevisionDupSwapUseRuntimeStackPath` in
-`src/tests/evm_jit_frontend_tests.cpp` is intentionally behavioral:
+The regression tests in `src/tests/evm_jit_frontend_tests.cpp` guard operand
+provenance rather than implementation details:
 
-- It uses `EVMC_FRONTIER`.
-- It asserts `DUP2` and `SWAP1` perform runtime stack access
-  (`stackGet`/`stackSet`) in legacy mode.
+- `LegacyRevisionDupSwapPreservesOperandOrder` validates low-revision DUP/SWAP
+  stack ordering without requiring a runtime-stack-only fallback.
+- `LowRevisionMaterializedMergePreservesCallOperandsAfterDeepDupSwap` asserts
+  the deep DUP/SWAP + merge case still lowers CALL with recipient `0xbb` under
+  `EVMC_FRONTIER`.
 
-If legacy runtime-stack branches are disabled in the visitor, the same test
-fails with:
-
-- `DupStats.StackGetCount == 0`
-- `SwapStats.StackGetCount == 0`
-- `SwapStats.StackSetCount == 0`
-
-That failure confirms the test is not cosmetic; it directly guards the legacy
-operand provenance needed by CALL-family lowering.
+These checks lock the actual root-cause surface: CALL operand provenance at
+lowering sites.

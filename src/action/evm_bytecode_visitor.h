@@ -105,6 +105,10 @@ private:
     return std::getenv("DTVM_DEBUG_LIFTED_STACK") != nullptr;
   }
 
+  static bool callProvenanceDebugEnabled() {
+    return std::getenv("DTVM_DEBUG_CALL_PROVENANCE") != nullptr;
+  }
+
   void spillTrackedStackPreservingPrefix(const std::vector<Operand> &Values,
                                          uint32_t PrefixDepth) {
     if constexpr (HasSpillTrackedStackPreservingPrefix<IRBuilder>::value) {
@@ -131,17 +135,10 @@ private:
   }
 
   void push(const Operand &Opnd) {
-    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
-      Builder.stackPush(Opnd);
-      return;
-    }
     Stack.push(Opnd);
   }
 
   void requireLogicalStackDepth(uint32_t Depth) {
-    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
-      return;
-    }
     if (liftedStackDebugEnabled() && Stack.getSize() < Depth) {
       std::fprintf(stderr,
                    "[lifted-check] logical-underflow pc=%llu block=%llu "
@@ -155,11 +152,6 @@ private:
   }
 
   Operand pop() {
-    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
-      Operand Opnd = Builder.stackPop();
-      Builder.releaseOperand(Opnd);
-      return Opnd;
-    }
     requireLogicalStackDepth(1);
     Operand Opnd = Stack.pop();
     Builder.releaseOperand(Opnd);
@@ -1168,11 +1160,6 @@ private:
       Builder.createStackCheckBlock(-BlockInfo.MinStackHeight,
                                     1024 - BlockInfo.MaxStackHeight);
     }
-    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
-      CurrentBlockLifted = false;
-      return;
-    }
-
     if (LiftedBlock) {
       CurrentBlockLifted = true;
       CurrentBlockHiddenLiveInPrefixDepth =
@@ -1875,8 +1862,7 @@ private:
   // DUP1-DUP16: Duplicate Nth stack item
   void handleDup(uint8_t Index) {
     Operand Result;
-    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE &&
-        Stack.getSize() < static_cast<uint32_t>(Index)) {
+    if (Stack.getSize() < static_cast<uint32_t>(Index)) {
       const int32_t MemIndex =
           static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize()) -
           1;
@@ -1896,26 +1882,24 @@ private:
 
   // SWAP1-SWAP16: Swap top with Nth+1 stack item
   void handleSwap(uint8_t Index) {
-    if (Ctx->getRevision() < EVMC_TANGERINE_WHISTLE) {
-      const uint32_t RequiredDepth = static_cast<uint32_t>(Index) + 1u;
-      if (Stack.empty()) {
-        const int32_t MemIndex =
-            static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize());
-        Operand A = Builder.stackGet(0);
-        Operand B = Builder.stackGet(MemIndex);
-        Builder.stackSet(0, B);
-        Builder.stackSet(MemIndex, A);
-        return;
-      }
-      if (Stack.getSize() < RequiredDepth) {
-        const int32_t MemIndex =
-            static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize());
-        Operand &A = Stack.peek(0);
-        Operand B = Builder.stackGet(MemIndex);
-        Builder.stackSet(MemIndex, A);
-        A = B;
-        return;
-      }
+    const uint32_t RequiredDepth = static_cast<uint32_t>(Index) + 1u;
+    if (Stack.empty()) {
+      const int32_t MemIndex =
+          static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize());
+      Operand A = Builder.stackGet(0);
+      Operand B = Builder.stackGet(MemIndex);
+      Builder.stackSet(0, B);
+      Builder.stackSet(MemIndex, A);
+      return;
+    }
+    if (Stack.getSize() < RequiredDepth) {
+      const int32_t MemIndex =
+          static_cast<int32_t>(Index) - static_cast<int32_t>(Stack.getSize());
+      Operand &A = Stack.peek(0);
+      Operand B = Builder.stackGet(MemIndex);
+      Builder.stackSet(MemIndex, A);
+      A = B;
+      return;
     }
     requireLogicalStackDepth(static_cast<uint32_t>(Index) + 1u);
     std::swap(Stack.peek(0), Stack.peek(Index));
@@ -2000,6 +1984,22 @@ private:
     Operand ArgsSizeOp = pop();
     Operand RetOffsetOp = pop();
     Operand RetSizeOp = pop();
+    if (callProvenanceDebugEnabled()) {
+      auto low = [](const Operand &Op) -> unsigned long long {
+        return Op.isConstant() ? static_cast<unsigned long long>(Op.getConstValue()[0])
+                               : 0ULL;
+      };
+      std::fprintf(stderr,
+                   "[call-provenance][visitor] rev=%d pc=%llu block=%llu "
+                   "logical=%u lifted=%d "
+                   "call low=[%llu,%llu,%llu,%llu,%llu,%llu,%llu]\n",
+                   static_cast<int>(Ctx->getRevision()),
+                   static_cast<unsigned long long>(PC),
+                   static_cast<unsigned long long>(CurrentBlockEntryPC),
+                   Stack.getSize(), CurrentBlockLifted ? 1 : 0, low(GasOp),
+                   low(ToAddrOp), low(ValueOp), low(ArgsOffsetOp),
+                   low(ArgsSizeOp), low(RetOffsetOp), low(RetSizeOp));
+    }
     Operand StatusOp =
         (Builder.*handler)(GasOp, ToAddrOp, ValueOp, ArgsOffsetOp, ArgsSizeOp,
                            RetOffsetOp, RetSizeOp);
