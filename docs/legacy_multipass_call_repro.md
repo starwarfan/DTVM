@@ -32,6 +32,55 @@ env SILKWORM_EVM=./libdtvmapi.so,mode=multipass DTVM_EVM_DISABLE_MULTIPASS_GREED
   --exclusive run_single_tx --block 254297 --tx-index 0
 ```
 
+Automated repro path (recommended):
+
+```bash
+bash tools/repro_legacy_call_254277.sh /path/to/silkworm
+```
+
+Standalone fixture extraction:
+
+```bash
+bash tools/extract_legacy_call_repro.sh
+```
+
+This generates:
+
+- `tests/evm/fixtures/legacy_call_repro/block_254277_tx_0.json`
+- `tests/evm/fixtures/legacy_call_repro/block_254297_tx_0.json`
+
+Standalone DTVM test entry:
+
+```bash
+ctest -R evmLegacyCallReproTests --output-on-failure
+```
+
+## Regression Validation Workflow
+
+Use the following loop to confirm the legacy DUP/SWAP stack-path fix is active:
+
+1. Temporarily disable the legacy runtime-stack branch in
+   `src/action/evm_bytecode_visitor.h` for revisions `< EVMC_TANGERINE_WHISTLE`.
+2. Rebuild `dtvmapi` and run:
+
+```bash
+bash tools/repro_legacy_call_254277.sh /path/to/silkworm
+```
+
+Expected result without fix: repro fails on `254277:0` (legacy accident path).
+
+3. Restore the legacy runtime-stack branch, rebuild `dtvmapi`, and rerun:
+
+```bash
+bash tools/repro_legacy_call_254277.sh /path/to/silkworm
+```
+
+Expected result with fix restored:
+
+- `254277:0` interpreter/multipass both `tx_gas=57956`
+- `254297:0` interpreter/multipass both `tx_gas=94849`
+- final line: `PASS: legacy CALL repro checks are green.`
+
 ## Root-Cause Direction
 
 In legacy revisions, stack lifting/logical-stack materialization can lose deep
