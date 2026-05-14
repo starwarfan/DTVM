@@ -55,31 +55,32 @@ Standalone DTVM test entry:
 ctest -R evmLegacyCallReproTests --output-on-failure
 ```
 
-## Regression Validation Workflow
+## Regression Validation Workflow (DTVM-Only)
 
-Use the following loop to confirm the legacy DUP/SWAP stack-path fix is active:
+The standalone repro path is validated inside DTVM tests (no Silkworm runtime
+needed at execution time):
+
+```bash
+ctest -R evmLegacyCallReproTests --output-on-failure
+```
+
+Verification loop for the legacy DUP/SWAP runtime-stack fix:
 
 1. Temporarily disable the legacy runtime-stack branch in
    `src/action/evm_bytecode_visitor.h` for revisions `< EVMC_TANGERINE_WHISTLE`.
-2. Rebuild `dtvmapi` and run:
+2. Rebuild and run:
 
 ```bash
-bash tools/repro_legacy_call_254277.sh /path/to/silkworm
+cmake --build build --target evmLegacyCallReproTests
+ctest -R evmLegacyCallReproTests --output-on-failure
 ```
 
-Expected result without fix: repro fails on `254277:0` (legacy accident path).
+Expected result with fix disabled: `evmLegacyCallReproTests` aborts on
+`ExecuteFixturesViaDTVMApi` (reproduced accident path `254277:0`).
 
-3. Restore the legacy runtime-stack branch, rebuild `dtvmapi`, and rerun:
+3. Restore the legacy runtime-stack branch and rerun the same commands.
 
-```bash
-bash tools/repro_legacy_call_254277.sh /path/to/silkworm
-```
-
-Expected result with fix restored:
-
-- `254277:0` interpreter/multipass both `tx_gas=57956`
-- `254297:0` interpreter/multipass both `tx_gas=94849`
-- final line: `PASS: legacy CALL repro checks are green.`
+Expected result with fix restored: `evmLegacyCallReproTests` passes.
 
 ## Root-Cause Direction
 

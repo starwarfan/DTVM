@@ -16,3 +16,9 @@ Each case file is self-contained and includes:
 
 Use `tools/extract_legacy_call_repro.sh` to regenerate fixtures from live chain
 data.
+
+For best historical nonce/balance fidelity during extraction, provide:
+
+- `SILKWORM_STAGED_PIPELINE_BIN`
+- `SILKWORM_DATADIR_254277`
+- `SILKWORM_DATADIR_254297`
