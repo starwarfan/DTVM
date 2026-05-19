@@ -841,9 +841,13 @@ const uint8_t *evmHandleCreateInternal(zen::runtime::EVMInstance *Instance,
   Instance->setReturnData(std::move(ReturnData));
 
   if (Result.status_code == EVMC_SUCCESS) {
-    static thread_local uint8_t PaddedAddress[32] = {0};
-    memcpy(PaddedAddress + 12, Result.create_address.bytes, 20);
-    return PaddedAddress;
+    // Keep returned CREATE addresses in per-instance cache to avoid aliasing
+    // between nested/re-entrant CREATE paths.
+    auto &ExecCache = Instance->getMessageCache();
+    evmc::bytes32 PaddedAddress{};
+    std::memcpy(PaddedAddress.bytes + 12, Result.create_address.bytes, 20);
+    ExecCache.CreateAddresses.push_back(PaddedAddress);
+    return ExecCache.CreateAddresses.back().bytes;
   }
   return ZeroAddress;
 }

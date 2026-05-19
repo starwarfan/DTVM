@@ -23,7 +23,6 @@ void EVMCallThreadState::setJITTraces() {
     return;
   }
   uint32_t IgnoredDepth = getTrapState().NumIgnoredFrames;
-  ZEN_ASSERT(Inst);
   void *JITCode = Inst->getModule()->getJITCode();
   void *JITCodeEnd =
       static_cast<uint8_t *>(JITCode) + Inst->getModule()->getJITCodeSize();

@@ -200,6 +200,9 @@ struct GasBlock {
 };
 
 static void addEdge(std::vector<GasBlock> &Blocks, uint32_t From, uint32_t To) {
+  if (From >= Blocks.size() || To >= Blocks.size()) {
+    return;
+  }
   auto &FromSuccs = Blocks[From].Succs;
   if (std::find(FromSuccs.begin(), FromSuccs.end(), To) == FromSuccs.end()) {
     FromSuccs.push_back(To);
@@ -223,6 +226,9 @@ static bool splitCriticalEdges(std::vector<GasBlock> &Blocks, size_t CodeSize) {
       continue; // Not a critical edge source
     }
     for (uint32_t ToId : Blocks[FromId].Succs) {
+      if (ToId >= Blocks.size()) {
+        continue;
+      }
       if (Blocks[ToId].Preds.size() > 1) {
         // Critical edge: From has multiple succs, To has multiple preds
         EdgesToSplit.push_back({static_cast<uint32_t>(FromId), ToId});
@@ -450,6 +456,9 @@ computeInCycle(const std::vector<GasBlock> &Blocks) {
     while (!Stack.empty()) {
       const uint32_t Node = Stack.back();
       Stack.pop_back();
+      if (Node >= NumBlocks) {
+        continue;
+      }
       Component.push_back(Node);
       for (uint32_t Pred : Blocks[Node].Preds) {
         if (Pred >= NumBlocks) {
@@ -466,6 +475,9 @@ computeInCycle(const std::vector<GasBlock> &Blocks) {
       for (uint32_t Id : Component) {
         InCycle[Id] = 1;
       }
+      continue;
+    }
+    if (Component.empty()) {
       continue;
     }
 
@@ -528,7 +540,13 @@ computeReachable(const std::vector<GasBlock> &Blocks, uint32_t EntryId) {
   while (!Stack.empty()) {
     const uint32_t Node = Stack.back();
     Stack.pop_back();
+    if (Node >= NumBlocks) {
+      continue;
+    }
     for (uint32_t Succ : Blocks[Node].Succs) {
+      if (Succ >= NumBlocks) {
+        continue;
+      }
       if (Reachable[Succ] == 0) {
         Reachable[Succ] = 1;
         Stack.push_back(Succ);
@@ -571,6 +589,9 @@ computeDominators(const std::vector<GasBlock> &Blocks,
       NewDom = All;
       bool HasPred = false;
       for (uint32_t Pred : Blocks[Node].Preds) {
+        if (Pred >= NumBlocks) {
+          continue;
+        }
         if (Reachable[Pred] == 0) {
           continue;
         }
@@ -604,6 +625,9 @@ findBackEdgesUsingDominators(const std::vector<GasBlock> &Blocks,
 
   for (size_t From = 0; From < NumBlocks; ++From) {
     for (uint32_t To : Blocks[From].Succs) {
+      if (To >= NumBlocks) {
+        continue;
+      }
       if (bitsetTest(Dom[From], To)) {
         BackEdges[From].push_back(To);
       }
@@ -613,6 +637,9 @@ findBackEdgesUsingDominators(const std::vector<GasBlock> &Blocks,
 
 static bool isBackEdge(const std::vector<std::vector<uint32_t>> &BackEdges,
                        uint32_t From, uint32_t To) {
+  if (From >= BackEdges.size()) {
+    return false;
+  }
   const auto &Edges = BackEdges[From];
   return std::find(Edges.begin(), Edges.end(), To) != Edges.end();
 }
@@ -634,6 +661,9 @@ computeReverseTopo(const std::vector<GasBlock> &Blocks,
     while (!Stack.empty()) {
       uint32_t Current = Stack.back();
       Stack.pop_back();
+      if (Current >= NumBlocks) {
+        continue;
+      }
       if (Visited[Current] == 2) {
         continue;
       }
@@ -647,6 +677,9 @@ computeReverseTopo(const std::vector<GasBlock> &Blocks,
       const auto &Succs = Blocks[Current].Succs;
       for (auto It = Succs.rbegin(); It != Succs.rend(); ++It) {
         uint32_t Succ = *It;
+        if (Succ >= NumBlocks) {
+          continue;
+        }
         if (!isBackEdge(BackEdges, Current, Succ) && Visited[Succ] == 0) {
           Visited[Succ] = 1;
           Stack.push_back(Succ);
@@ -679,7 +712,13 @@ collectNaturalLoop(uint32_t From, uint32_t Header,
   while (!Stack.empty()) {
     const uint32_t Node = Stack.back();
     Stack.pop_back();
+    if (Node >= NumBlocks) {
+      continue;
+    }
     for (uint32_t Pred : Blocks[Node].Preds) {
+      if (Pred >= NumBlocks) {
+        continue;
+      }
       if (Reachable[Pred] == 0) {
         continue;
       }
@@ -713,6 +752,9 @@ static bool buildLoopsUsingDominance(
       continue;
     }
     for (uint32_t To : Blocks[From].Succs) {
+      if (To >= NumBlocks) {
+        continue;
+      }
       if (!bitsetTest(Dom[From], To)) {
         continue;
       }
@@ -758,6 +800,9 @@ static bool buildLoopsUsingDominance(
 
   for (const auto &Loop : Loops) {
     for (uint32_t Node : Loop.Nodes) {
+      if (Node >= Dom.size() || Loop.Header >= NumBlocks) {
+        return false;
+      }
       if (!bitsetTest(Dom[Node], Loop.Header)) {
         return false;
       }
@@ -814,6 +859,9 @@ static bool buildLoopsUsingDominance(
   for (size_t OrderIndex = 0; OrderIndex < LoopOrder.size(); ++OrderIndex) {
     const size_t LoopId = LoopOrder[OrderIndex];
     for (uint32_t Node : Loops[LoopId].Nodes) {
+      if (Node >= LoopOf.size()) {
+        return false;
+      }
       if (LoopOf[Node] == -1) {
         LoopOf[Node] = static_cast<int32_t>(LoopId);
       }
@@ -832,8 +880,14 @@ static bool buildLoopsUsingDominance(
   for (size_t LoopId = 0; LoopId < Loops.size(); ++LoopId) {
     auto &Loop = Loops[LoopId];
     for (uint32_t Node : Loop.Nodes) {
+      if (Node >= NumBlocks) {
+        continue;
+      }
       bool IsExit = false;
       for (uint32_t Succ : Blocks[Node].Succs) {
+        if (Succ >= NumBlocks) {
+          continue;
+        }
         if (!bitsetTest(Loop.NodeMask, Succ)) {
           IsExit = true;
           break;
@@ -872,6 +926,9 @@ static bool lemma614Update(uint32_t NodeId, const std::vector<GasBlock> &Blocks,
 
   uint64_t MinSucc = UINT64_MAX;
   for (uint32_t Succ : Node.Succs) {
+    if (Succ >= Blocks.size() || Succ >= Metering.size()) {
+      continue;
+    }
     if (BackEdges && isBackEdge(*BackEdges, NodeId, Succ)) {
       continue;
     }
@@ -891,6 +948,9 @@ static bool lemma614Update(uint32_t NodeId, const std::vector<GasBlock> &Blocks,
 
   Metering[NodeId] += MinSucc;
   for (uint32_t Succ : Node.Succs) {
+    if (Succ >= Blocks.size() || Succ >= Metering.size()) {
+      continue;
+    }
     if (BackEdges && isBackEdge(*BackEdges, NodeId, Succ)) {
       continue;
     }
