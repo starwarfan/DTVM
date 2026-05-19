@@ -528,7 +528,7 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
 
   // Ensure runtime and isolation exist
   if (!ensureRuntimeAndIsolation(VM)) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, 0, nullptr, 0);
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
   // Module lookup: L1 address-based cache -> Cold load
@@ -536,14 +536,14 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   EVMModule *Mod =
       findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
   if (!Mod) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, 0, nullptr, 0);
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
   ModuleGuard ModGuard(VM, Mod, IsTransientMod);
 
   // Instance reuse (shared only for cacheable top-level calls)
   EVMInstance *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
   if (!TheInst) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, 0, nullptr, 0);
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
   // Trigger bytecodeCache build if not yet done (lazy, cached on module)
@@ -638,7 +638,7 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
 
   // Ensure runtime and isolation exist
   if (!ensureRuntimeAndIsolation(VM)) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, 0, nullptr, 0);
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
   // Empty-code top-level CALL to a non-precompile has no bytecode execution.
@@ -659,7 +659,7 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
   EVMModule *Mod =
       findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
   if (!Mod) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, 0, nullptr, 0);
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
   ModuleGuard ModGuard(VM, Mod, IsTransientMod);
 
@@ -675,7 +675,7 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
   // Instance reuse (shared only for cacheable top-level calls)
   EVMInstance *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);
   if (!TheInst) {
-    return evmc_make_result(EVMC_FAILURE, 0, 0, 0, nullptr, 0);
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
 
   // Setup message with code pointers (same pattern as interpreter fast path)
@@ -732,7 +732,7 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
   // JIT mode: use optimized fast path (bypasses callEVMMain/virtual stack)
   return executeMultipassFastPath(VM, Host, Context, Rev, Msg, Code, CodeSize);
 #else
-    return evmc_make_result(EVMC_FAILURE, 0, 0, 0, nullptr, 0);
+    return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
 #endif // ZEN_ENABLE_JIT
 }
 
