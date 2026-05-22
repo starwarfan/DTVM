@@ -1,0 +1,29 @@
+{
+  "description": "Standalone legacy CALL repro fixtures.",
+  "cases": [
+    {
+      "name": "legacy_call_creation_cost_block_254277_tx0",
+      "fixture": "block_254277_tx_0.json"
+    },
+    {
+      "name": "legacy_guard_block_254297_tx0",
+      "fixture": "block_254297_tx_0.json"
+    },
+    {
+      "name": "wrong_block_gas_block_433153_tx0",
+      "fixture": "block_433153_tx_0.json"
+    },
+    {
+      "name": "wrong_block_gas_block_433153_tx1",
+      "fixture": "block_433153_tx_1.json"
+    },
+    {
+      "name": "block_gas_limit_block_1431916_tx38",
+      "fixture": "block_1431916_tx_38.json"
+    },
+    {
+      "name": "block_gas_limit_block_1431916_prefix_tx38",
+      "fixture": "block_1431916_prefix_tx_38.json"
+    }
+  ]
+}
