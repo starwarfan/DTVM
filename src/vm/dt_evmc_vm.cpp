@@ -287,8 +287,36 @@ bool shouldUsePersistentModuleCache(const evmc_message *Msg) {
     return false;
   }
   // Regular calls at any depth are safe to cache: deployed code at a non-zero
-  // address is immutable. The module is keyed by (code_address, revision).
+  // address is immutable. The module is keyed by (code_address, revision) and
+  // configurable validation (strict full compare vs relaxed head/tail) runs
+  // before reuse.
   return true;
+}
+
+bool shouldRetryModuleLoadWithFastRA(const DTVM *VM, const Error &Err) {
+  return VM->Config.Mode == RunMode::MultipassMode &&
+         !VM->Config.DisableMultipassGreedyRA &&
+         Err.getPhase() == ErrorPhase::Compilation &&
+         Err.getSubphase() == ErrorSubphase::RegAlloc;
+}
+
+zen::common::MayBe<EVMModule *> loadEVMModuleWithRegAllocRetry(
+    DTVM *VM, const std::string &ModName, const uint8_t *Code, size_t CodeSize,
+    evmc_revision Rev, EVMMemorySpecializationProfile MemoryProfile = {}) {
+  auto ModRet =
+      VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev, MemoryProfile);
+  if (ModRet || !shouldRetryModuleLoadWithFastRA(VM, ModRet.getError())) {
+    return ModRet;
+  }
+
+  RuntimeConfig RetryConfig = VM->Config;
+  RetryConfig.DisableMultipassGreedyRA = true;
+  auto RetryRuntime = Runtime::newEVMRuntime(RetryConfig, VM->ExecHost.get());
+  if (!RetryRuntime) {
+    return ModRet;
+  }
+  return RetryRuntime->loadEVMModule(ModName, Code, CodeSize, Rev,
+                                     MemoryProfile);
 }
 
 EVMModule *loadTransientModule(DTVM *VM, const uint8_t *Code, size_t CodeSize,
@@ -507,7 +535,20 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
 
   evmc::Result Result =
       std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
+  if (std::getenv("DTVM_DEBUG_TX_GAS") != nullptr) {
+    std::fprintf(stderr,
+                 "[dtvm-exec-debug] interp exe_refund=%lld inst_refund=%lld "
+                 "exe_gas_left=%lld inst_gas=%llu\n",
+                 static_cast<long long>(Result.gas_refund),
+                 static_cast<long long>(TheInst->getGasRefund()),
+                 static_cast<long long>(Result.gas_left),
+                 static_cast<unsigned long long>(TheInst->getGas()));
+  }
   Result.gas_left = TheInst->getGas();
+  // Interpreter stores refund on ExeResult; do not clobber with Inst (often 0).
+  if (Result.gas_refund == 0) {
+    Result.gas_refund = TheInst->getGasRefund();
+  }
 
   return Result.release_raw();
 }
@@ -610,7 +651,20 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
   VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
 #endif // ZEN_ENABLE_VIRTUAL_STACK
 
+  if (std::getenv("DTVM_DEBUG_TX_GAS") != nullptr) {
+    std::fprintf(stderr,
+                 "[dtvm-exec-debug] multipass result_refund=%lld inst_refund=%lld "
+                 "result_gas_left=%lld inst_gas=%llu status=%d\n",
+                 static_cast<long long>(Result.gas_refund),
+                 static_cast<long long>(TheInst->getGasRefund()),
+                 static_cast<long long>(Result.gas_left),
+                 static_cast<unsigned long long>(TheInst->getGas()),
+                 static_cast<int>(Result.status_code));
+  }
   Result.gas_left = TheInst->getGas();
+  if (Result.gas_refund == 0) {
+    Result.gas_refund = TheInst->getGasRefund();
+  }
   return Result.release_raw();
 }
 #endif // ZEN_ENABLE_JIT

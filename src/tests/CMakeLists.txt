@@ -68,10 +68,12 @@ if(ZEN_ENABLE_SPEC_TEST)
       evmStateTests evm_precompiles.hpp evm_state_tests.cpp
                     evm_test_fixtures.cpp evm_test_helpers.cpp
     )
+    add_executable(evmLegacyCallReproTests evm_legacy_call_repro_tests.cpp)
     # Only build evmFallbackExecutionTests if dtvmapi library is available
     if(ZEN_ENABLE_LIBEVM)
       add_executable(evmFallbackExecutionTests evm_fallback_execution_tests.cpp)
       add_executable(evmModuleCacheTests evm_module_cache_tests.cpp)
+      add_executable(evmCreateDeployCacheTests evm_create_deploy_cache_tests.cpp)
     endif()
     add_executable(mptCompareCpp mpt_compare_cpp.cpp)
   else()
@@ -128,6 +130,11 @@ if(ZEN_ENABLE_SPEC_TEST)
           PRIVATE dtvmcore rapidjson mpt gtest_main -fsanitize=address
           PUBLIC ${GTEST_BOTH_LIBRARIES}
         )
+        target_link_libraries(
+          evmLegacyCallReproTests
+          PRIVATE dtvmcore rapidjson dtvmapi gtest_main -fsanitize=address
+          PUBLIC ${GTEST_BOTH_LIBRARIES}
+        )
         if(ZEN_ENABLE_LIBEVM)
           target_link_libraries(
             evmFallbackExecutionTests
@@ -136,6 +143,11 @@ if(ZEN_ENABLE_SPEC_TEST)
           )
           target_link_libraries(
             evmModuleCacheTests
+            PRIVATE dtvmapi gtest_main -fsanitize=address
+            PUBLIC ${GTEST_BOTH_LIBRARIES}
+          )
+          target_link_libraries(
+            evmCreateDeployCacheTests
             PRIVATE dtvmapi gtest_main -fsanitize=address
             PUBLIC ${GTEST_BOTH_LIBRARIES}
           )
@@ -188,6 +200,16 @@ if(ZEN_ENABLE_SPEC_TEST)
                   -static-libasan
           PUBLIC ${GTEST_BOTH_LIBRARIES}
         )
+        target_link_libraries(
+          evmLegacyCallReproTests
+          PRIVATE dtvmcore
+                  rapidjson
+                  dtvmapi
+                  gtest_main
+                  -fsanitize=address
+                  -static-libasan
+          PUBLIC ${GTEST_BOTH_LIBRARIES}
+        )
         if(ZEN_ENABLE_LIBEVM)
           target_link_libraries(
             evmFallbackExecutionTests
@@ -196,6 +218,11 @@ if(ZEN_ENABLE_SPEC_TEST)
           )
           target_link_libraries(
             evmModuleCacheTests
+            PRIVATE dtvmapi gtest_main -fsanitize=address -static-libasan
+            PUBLIC ${GTEST_BOTH_LIBRARIES}
+          )
+          target_link_libraries(
+            evmCreateDeployCacheTests
             PRIVATE dtvmapi gtest_main -fsanitize=address -static-libasan
             PUBLIC ${GTEST_BOTH_LIBRARIES}
           )
@@ -234,6 +261,11 @@ if(ZEN_ENABLE_SPEC_TEST)
         PRIVATE dtvmcore rapidjson mpt gtest_main
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
+      target_link_libraries(
+        evmLegacyCallReproTests
+        PRIVATE dtvmcore rapidjson dtvmapi gtest_main
+        PUBLIC ${GTEST_BOTH_LIBRARIES}
+      )
       if(ZEN_ENABLE_LIBEVM)
         target_link_libraries(
           evmFallbackExecutionTests
@@ -242,6 +274,11 @@ if(ZEN_ENABLE_SPEC_TEST)
         )
         target_link_libraries(
           evmModuleCacheTests
+          PRIVATE dtvmapi gtest_main
+          PUBLIC ${GTEST_BOTH_LIBRARIES}
+        )
+        target_link_libraries(
+          evmCreateDeployCacheTests
           PRIVATE dtvmapi gtest_main
           PUBLIC ${GTEST_BOTH_LIBRARIES}
         )
@@ -271,9 +308,11 @@ if(ZEN_ENABLE_SPEC_TEST)
         -P ${CMAKE_CURRENT_SOURCE_DIR}/RunSpecTests.cmake
     )
     add_test(NAME evmStateTests COMMAND evmStateTests)
+    add_test(NAME evmLegacyCallReproTests COMMAND evmLegacyCallReproTests)
     if(ZEN_ENABLE_LIBEVM)
       add_test(NAME evmFallbackExecutionTests COMMAND evmFallbackExecutionTests)
       add_test(NAME evmModuleCacheTests COMMAND evmModuleCacheTests)
+      add_test(NAME evmCreateDeployCacheTests COMMAND evmCreateDeployCacheTests)
     endif()
   endif()
 endif()

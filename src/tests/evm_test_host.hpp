@@ -12,6 +12,8 @@
 #include "utils/evm.h"
 #include "utils/rlp_encoding.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <unordered_set>
 #include <utility>
 
@@ -87,6 +89,9 @@ public:
 
   void setRuntime(Runtime *NewRT) { RT = NewRT; }
   Runtime *getRuntime() const { return RT; }
+
+  void setRevision(evmc_revision Rev) { Revision = Rev; }
+  evmc_revision getRevision() const { return Revision; }
 
   void loadInitialState(const evmc_tx_context &Context,
                         const std::vector<AccountInitEntry> &Accounts,
@@ -229,7 +234,8 @@ public:
       Result.GasUsed += Config.IntrinsicGas;
       uint64_t GasRefund = static_cast<uint64_t>(
           std::max<int64_t>(0, PrecompileResult.gas_refund));
-      uint64_t RefundLimit = Result.GasUsed / 5;
+      const uint64_t RefundQuotient = ActiveRevision >= EVMC_LONDON ? 5 : 2;
+      uint64_t RefundLimit = Result.GasUsed / RefundQuotient;
       Result.GasRefund = std::min(GasRefund, RefundLimit);
       Result.GasCharged = Result.GasUsed > Result.GasRefund
                               ? Result.GasUsed - Result.GasRefund
@@ -266,7 +272,8 @@ public:
       Result.GasUsed += Config.IntrinsicGas;
       uint64_t GasRefund =
           static_cast<uint64_t>(std::max<int64_t>(0, CreateResult.gas_refund));
-      uint64_t RefundLimit = Result.GasUsed / 5;
+      const uint64_t RefundQuotient = ActiveRevision >= EVMC_LONDON ? 5 : 2;
+      uint64_t RefundLimit = Result.GasUsed / RefundQuotient;
       Result.GasRefund = std::min(GasRefund, RefundLimit);
       Result.GasCharged = Result.GasUsed > Result.GasRefund
                               ? Result.GasUsed - Result.GasRefund
@@ -366,10 +373,11 @@ public:
             : 0;
 
     Result.GasUsed += Config.IntrinsicGas;
-    uint64_t GasRefund =
-        static_cast<uint64_t>(std::max<int64_t>(0, Inst->getGasRefund()));
-    uint64_t RefundLimit = Result.GasUsed / 5;
-    Result.GasRefund = std::min(GasRefund, RefundLimit);
+      uint64_t GasRefund =
+          static_cast<uint64_t>(std::max<int64_t>(0, Inst->getGasRefund()));
+      const uint64_t RefundQuotient = ActiveRevision >= EVMC_LONDON ? 5 : 2;
+      uint64_t RefundLimit = Result.GasUsed / RefundQuotient;
+      Result.GasRefund = std::min(GasRefund, RefundLimit);
     Result.GasCharged = Result.GasUsed > Result.GasRefund
                             ? Result.GasUsed - Result.GasRefund
                             : 0;
@@ -571,6 +579,18 @@ public:
           Inst->popMessage();
         } else {
           RT->callEVMMain(*Inst, CallMsg, ExecResult);
+          if (std::getenv("DTVM_DEBUG_CALL_GAS") != nullptr) {
+            const int64_t InstGas = static_cast<int64_t>(Inst->getGas());
+            const int64_t ExeGasLeft =
+                static_cast<int64_t>(ExecResult.gas_left);
+            if (InstGas != ExeGasLeft) {
+              std::fprintf(stderr,
+                           "[host-call-gas] depth=%d inst_gas=%lld exe_gas_left=%lld\n",
+                           static_cast<int>(Msg.depth),
+                           static_cast<long long>(InstGas),
+                           static_cast<long long>(ExeGasLeft));
+            }
+          }
         }
       } catch (const std::exception &E) {
         ZEN_LOG_ERROR("Error in recursive call: {}", E.what());
@@ -589,7 +609,10 @@ public:
       if (RemainingGas < 0) {
         RemainingGas = static_cast<int64_t>(Inst->getGas());
       }
-      int64_t GasRefund = static_cast<int64_t>(Inst->getGasRefund());
+      int64_t GasRefund = ExecResult.gas_refund;
+      if (GasRefund <= 0) {
+        GasRefund = static_cast<int64_t>(Inst->getGasRefund());
+      }
       if (shouldRevertState(ExecResult.status_code)) {
         restoreHostState(StateSnapshot);
       }
@@ -772,7 +795,19 @@ public:
       SenderAcc.balance = intx::be::store<evmc::bytes32>(SenderBalance);
       NewAcc.balance = intx::be::store<evmc::bytes32>(NewAccBalance);
 
-      evmc_message CallMsg = Msg;
+      // Silkworm runs initcode as EVMC_CALL with code_address zeroed
+      // (deploy_message in silkworm/core/execution/evm.cpp).
+      evmc_message CallMsg{};
+      CallMsg.kind = EVMC_CALL;
+      CallMsg.flags = Msg.flags;
+      CallMsg.depth = Msg.depth;
+      CallMsg.gas = Msg.gas;
+      CallMsg.sender = Msg.sender;
+      CallMsg.recipient = NewAddr;
+      CallMsg.value = Msg.value;
+      CallMsg.code_address = {};
+      CallMsg.input_data = Msg.input_data;
+      CallMsg.input_size = Msg.input_size;
       evmc::Result ExecResult{};
       int64_t InterpGasLeft = -1;
       try {
