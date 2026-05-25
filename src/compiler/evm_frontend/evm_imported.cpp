@@ -5,6 +5,7 @@
 #include "common/errors.h"
 #include "evm/gas_storage_cost.h"
 #include "evm/interpreter.h"
+#include "evm/opcode_gas_trace.h"
 #include "host/evm/crypto.h"
 #include "runtime/evm_instance.h"
 #include "runtime/evm_module.h"
@@ -878,6 +879,8 @@ static uint64_t evmHandleCallInternal(
   evmc::address TargetAddr =
       ToAddr ? loadAddressFromLE(ToAddr) : evmc::address{};
   evmc_revision Rev = Instance->getRevision();
+  const bool debug_call_gas = std::getenv("DTVM_DEBUG_CALL_GAS") != nullptr;
+  const uint64_t parent_gas_before = Instance->getGas();
   if (Rev >= EVMC_BERLIN &&
       Module->Host->access_account(TargetAddr) == EVMC_ACCESS_COLD) {
     Instance->chargeGas(zen::evm::ADDITIONAL_COLD_ACCOUNT_ACCESS_COST);
@@ -984,6 +987,8 @@ static uint64_t evmHandleCallInternal(
       .code_size = 0,
   };
 
+  const uint64_t CallGasSent = CallGas;
+
   Instance->pushMessage(&CallMsg);
   evmc::Result Result = Module->Host->call(CallMsg);
   Instance->popMessage();
@@ -1014,6 +1019,19 @@ static uint64_t evmHandleCallInternal(
 
   // Determine success (1) or failure (0)
   uint64_t Success = (Result.status_code == EVMC_SUCCESS) ? 1 : 0;
+
+  if (debug_call_gas) {
+    std::fprintf(stderr,
+                 "[jit-call-gas] rev=%d depth=%d kind=%d parent_gas_before=%llu "
+                 "call_gas_sent=%llu result_gas_left=%lld paid_gas_used=%llu status=%d\n",
+                 static_cast<int>(Rev), static_cast<int>(CurrentMsg->depth),
+                 static_cast<int>(CallKind),
+                 static_cast<unsigned long long>(parent_gas_before),
+                 static_cast<unsigned long long>(CallGasSent),
+                 static_cast<long long>(Result.gas_left),
+                 static_cast<unsigned long long>(GasUsed),
+                 static_cast<int>(Result.status_code));
+  }
 
   return Success;
 }
@@ -1056,6 +1074,33 @@ void evmHandleUndefined(zen::runtime::EVMInstance *Instance) {
   Instance->setGas(0);
   Instance->setExeResult(std::move(ExeResult));
   Instance->exit(5);
+}
+
+void evmTraceOpcodeGas(zen::runtime::EVMInstance *Instance, uint32_t Pc,
+                       uint32_t Opcode, uint64_t Cost) {
+  const evmc_message *Msg = Instance->getCurrentMessage();
+  const int32_t Depth = Msg != nullptr ? Msg->depth : 0;
+  zen::evm::recordJitExecGas(Pc, static_cast<uint8_t>(Opcode), Cost, Depth);
+}
+
+void evmTraceOpcodeGasRange(zen::runtime::EVMInstance *Instance,
+                            uint32_t StartPc, uint32_t EndPcExclusive) {
+  const zen::runtime::EVMModule *Module = Instance->getModule();
+  if (Module == nullptr || StartPc >= EndPcExclusive ||
+      EndPcExclusive > Module->CodeSize) {
+    return;
+  }
+  const evmc_message *Msg = Instance->getCurrentMessage();
+  const int32_t Depth = Msg != nullptr ? Msg->depth : 0;
+  const auto *Metrics =
+      evmc_get_instruction_metrics_table(Instance->getRevision());
+  if (Metrics == nullptr) {
+    Metrics = evmc_get_instruction_metrics_table(EVMC_HOMESTEAD);
+  }
+  for (uint32_t Pc = StartPc; Pc < EndPcExclusive; ++Pc) {
+    const uint8_t Opcode = static_cast<uint8_t>(Module->Code[Pc]);
+    zen::evm::recordJitExecGas(Pc, Opcode, Metrics[Opcode].gas_cost, Depth);
+  }
 }
 
 uint64_t evmHandleDelegateCall(zen::runtime::EVMInstance *Instance,

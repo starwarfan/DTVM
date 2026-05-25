@@ -1197,11 +1197,27 @@ static bool buildGasChunksSPP(const zen::common::Byte *Code, size_t CodeSize,
     const bool SkipInterpChunk =
         HasDynamicJump || isGasSensitiveTerminator(Blocks[Id].LastOpcode) ||
         InCycle[Id] != 0;
-    GasChunkEnd[Blocks[Id].Start] = Blocks[Id].End;
-    if (!SkipInterpChunk) {
-      GasChunkCost[Blocks[Id].Start] = Blocks[Id].Cost;
+    if (!HasDynamicJump) {
+      GasChunkEnd[Blocks[Id].Start] = Blocks[Id].End;
+      if (!SkipInterpChunk) {
+        GasChunkCost[Blocks[Id].Start] = Blocks[Id].Cost;
+      }
+      GasChunkCostSPP[Blocks[Id].Start] = Metering[Id];
     }
-    GasChunkCostSPP[Blocks[Id].Start] = Metering[Id];
+    // HasDynamicJump: leave GasChunkEnd/GasChunkCostSPP zero so both interpreter
+    // and JIT meter per-opcode. SPP Metering over-approximates dynamic-jump CFG.
+  }
+
+  if (HasDynamicJump && std::getenv("DTVM_DEBUG_GAS_CHUNK_WRITE") != nullptr) {
+    size_t SppStarts = 0;
+    for (size_t Pc = 0; Pc < CodeSize; ++Pc) {
+      if (GasChunkCostSPP[Pc] > 0) {
+        ++SppStarts;
+      }
+    }
+    std::fprintf(stderr,
+                 "[gas-chunk-write] HasDynamicJump codesize=%zu spp_starts=%zu\n",
+                 CodeSize, SppStarts);
   }
 
   return true;

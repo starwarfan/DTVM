@@ -7,6 +7,7 @@
 #include "compiler/mir/constants.h"
 #include "compiler/mir/module.h"
 #include "evm/gas_storage_cost.h"
+#include "evm/opcode_gas_trace.h"
 #include "runtime/evm_instance.h"
 #include "utils/hash_utils.h"
 #include "utils/logging.h"
@@ -19,6 +20,18 @@
 #endif
 
 namespace COMPILER {
+
+namespace {
+
+bool isJitOpcodeGasRuntimeTraceEnabled() {
+  static const int Enabled = []() {
+    const char *Env = std::getenv("DTVM_DEBUG_OPCODE_GAS_RUNTIME");
+    return Env != nullptr && Env[0] != '\0' && std::strcmp(Env, "0") != 0;
+  }();
+  return Enabled != 0;
+}
+
+} // namespace
 
 // Hash table constants
 constexpr uint64_t HashMultiplier = 0x9E3779B97F4A7C15ULL;
@@ -285,6 +298,7 @@ void EVMMirBuilder::initEVM(CompilerContext *Context) {
   GasChunkEnd = EvmCtx->getGasChunkEnd();
   GasChunkCost = EvmCtx->getGasChunkCost();
   GasChunkSize = EvmCtx->getGasChunkSize();
+  buildInsideGasChunkIndex();
 
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   initGasRegister();
@@ -412,19 +426,74 @@ StoreInstruction *EVMMirBuilder::setInstanceElement(MType *ValueType,
                                              InstancePtr, Offset);
 }
 
+void EVMMirBuilder::buildInsideGasChunkIndex() {
+  InsideGasChunk.clear();
+  if (!GasChunkEnd || !GasChunkCost || GasChunkSize == 0) {
+    return;
+  }
+  InsideGasChunk.assign(GasChunkSize, 0);
+  for (size_t PC = 0; PC < GasChunkSize; ++PC) {
+    if (GasChunkEnd[PC] <= PC) {
+      continue;
+    }
+    const uint64_t Cost =
+        GasChunkCostSPP ? GasChunkCostSPP[PC] : GasChunkCost[PC];
+    if (Cost == 0) {
+      continue;
+    }
+    const size_t End = std::min<size_t>(GasChunkEnd[PC], GasChunkSize);
+    for (size_t I = PC + 1; I < End; ++I) {
+      InsideGasChunk[I] = 1;
+    }
+  }
+}
+
+bool EVMMirBuilder::isInsidePrepaidGasChunk(uint64_t PC) const {
+  return PC < InsideGasChunk.size() && InsideGasChunk[PC] != 0;
+}
+
+void EVMMirBuilder::emitJitOpcodeGasTrace(uint64_t PC, uint8_t Opcode,
+                                          uint64_t Cost) {
+  if (Cost == 0) {
+    return;
+  }
+  zen::evm::recordJitEmitGas(static_cast<uint32_t>(PC), Opcode, Cost);
+  if (!isJitOpcodeGasRuntimeTraceEnabled()) {
+    return;
+  }
+  MType *U32Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT32);
+  MType *U64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  callRuntimeForWithErrorCheck<void, uint32_t, uint32_t, uint64_t>(
+      evmTraceOpcodeGas,
+      Operand(createIntConstInstruction(U32Type, static_cast<uint32_t>(PC)),
+              EVMType::UINT32),
+      Operand(createIntConstInstruction(U32Type, static_cast<uint32_t>(Opcode)),
+              EVMType::UINT32),
+      Operand(createIntConstInstruction(U64Type, Cost), EVMType::UINT64));
+}
+
 void EVMMirBuilder::meterOpcode(evmc_opcode Opcode, uint64_t PC) {
   if (!Ctx.isGasMeteringEnabled()) {
     return;
   }
   if (GasChunkEnd && GasChunkCost && PC < GasChunkSize) {
     if (GasChunkEnd[PC] > PC) {
-      meterGas(GasChunkCost[PC]);
+      const uint64_t Cost =
+          GasChunkCostSPP ? GasChunkCostSPP[PC] : GasChunkCost[PC];
+      if (Cost > 0) {
+        emitJitOpcodeGasTrace(PC, 0xfe, Cost);
+        meterGas(Cost);
+        return;
+      }
+    } else if (isInsidePrepaidGasChunk(PC)) {
+      return;
     }
-    return;
   }
   const uint8_t Index = static_cast<uint8_t>(Opcode);
   const auto &Metrics = InstructionMetrics[Index];
-  meterGas(static_cast<uint64_t>(Metrics.gas_cost));
+  const uint64_t Cost = static_cast<uint64_t>(Metrics.gas_cost);
+  emitJitOpcodeGasTrace(PC, Index, Cost);
+  meterGas(Cost);
 }
 
 void EVMMirBuilder::meterOpcodeRange(uint64_t StartPC,
@@ -439,7 +508,30 @@ void EVMMirBuilder::meterOpcodeRange(uint64_t StartPC,
     const uint32_t RunLastPC = JumpDestRunLastPC[static_cast<size_t>(StartPC)];
     if (RunLastPC != InvalidJumpDestRunPC &&
         static_cast<uint64_t>(RunLastPC) == EndPCExclusive) {
-      meterGas(JumpDestRunSkipCost[static_cast<size_t>(StartPC)]);
+      const uint64_t SkipCost = JumpDestRunSkipCost[static_cast<size_t>(StartPC)];
+      const auto *EvmCtx = static_cast<const EVMFrontendContext *>(&Ctx);
+      const Byte *Bytecode = EvmCtx->getBytecode();
+      if (Bytecode != nullptr) {
+        for (uint64_t PC = StartPC; PC < EndPCExclusive; ++PC) {
+          const uint8_t Opcode = static_cast<uint8_t>(Bytecode[PC]);
+          const uint64_t Cost =
+              static_cast<uint64_t>(InstructionMetrics[Opcode].gas_cost);
+          emitJitOpcodeGasTrace(PC, Opcode, Cost);
+        }
+      }
+      if (isJitOpcodeGasRuntimeTraceEnabled()) {
+        MType *U32Type =
+            EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT32);
+        callRuntimeForWithErrorCheck<void, uint32_t, uint32_t>(
+            evmTraceOpcodeGasRange,
+            Operand(createIntConstInstruction(U32Type,
+                                            static_cast<uint32_t>(StartPC)),
+                    EVMType::UINT32),
+            Operand(createIntConstInstruction(
+                        U32Type, static_cast<uint32_t>(EndPCExclusive)),
+                    EVMType::UINT32));
+      }
+      meterGas(SkipCost);
       return;
     }
   }
@@ -461,7 +553,16 @@ void EVMMirBuilder::meterOpcodeRange(uint64_t StartPC,
     uint64_t Cost = 0;
     if (GasChunkEnd && GasChunkCost && PC < GasChunkSize &&
         GasChunkEnd[PC] > PC) {
-      Cost = GasChunkCost[PC];
+      const uint64_t ChunkCost =
+          GasChunkCostSPP ? GasChunkCostSPP[PC] : GasChunkCost[PC];
+      if (ChunkCost > 0) {
+        Cost = ChunkCost;
+      } else {
+        const uint8_t Opcode = static_cast<uint8_t>(Bytecode[PC]);
+        Cost = static_cast<uint64_t>(InstructionMetrics[Opcode].gas_cost);
+      }
+    } else if (isInsidePrepaidGasChunk(PC)) {
+      Cost = 0;
     } else {
       const uint8_t Opcode = static_cast<uint8_t>(Bytecode[PC]);
       Cost = static_cast<uint64_t>(InstructionMetrics[Opcode].gas_cost);
@@ -471,7 +572,22 @@ void EVMMirBuilder::meterOpcodeRange(uint64_t StartPC,
       TotalCost = UINT64_MAX;
       break;
     }
+    if (Cost > 0) {
+      const uint8_t Opcode = static_cast<uint8_t>(Bytecode[PC]);
+      emitJitOpcodeGasTrace(PC, Opcode, Cost);
+    }
     TotalCost += Cost;
+  }
+
+  if (isJitOpcodeGasRuntimeTraceEnabled()) {
+    MType *U32Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT32);
+    callRuntimeForWithErrorCheck<void, uint32_t, uint32_t>(
+        evmTraceOpcodeGasRange,
+        Operand(createIntConstInstruction(U32Type, static_cast<uint32_t>(StartPC)),
+                EVMType::UINT32),
+        Operand(createIntConstInstruction(U32Type,
+                                          static_cast<uint32_t>(EndPCExclusive)),
+                EVMType::UINT32));
   }
 
   meterGas(TotalCost);
@@ -1001,44 +1117,48 @@ void EVMMirBuilder::createJumpTable() {
         }
       } else {
         // For merged runs, materialize per-target entry thunks that charge the
-        // exact skipped metering before entering the shared body.
+        // JUMPDEST gas for [DestPC, RangeEnd) before entering the shared body.
+        // The body block still meters the final JUMPDEST at RangeEnd on entry.
         //
         // NOTE: We may create O(n) thunks for a run of length n. Avoid an
-        // O(n^2) compile-time cost by precomputing the suffix sums of skipped
-        // metering once for the run.
+        // O(n^2) compile-time cost by precomputing forward sums once for the
+        // run.
         const size_t SkipCount = RangeEnd - RangeStart; // exclude RangeEnd
         const uint64_t JumpDestBaseCost = static_cast<uint64_t>(
             InstructionMetrics[static_cast<uint8_t>(evmc_opcode::OP_JUMPDEST)]
                 .gas_cost);
-        std::vector<uint64_t> SkipCostByOffset(SkipCount, 0);
-        if (SkipCount > 0) {
-          uint64_t Running = 0;
-          for (size_t Offset = SkipCount; Offset > 0; --Offset) {
-            const size_t Pc = RangeStart + (Offset - 1);
-            uint64_t Cost = 0;
-            if (GasChunkEnd && GasChunkCost && Pc < GasChunkSize &&
-                GasChunkEnd[Pc] > Pc) {
-              Cost = GasChunkCost[Pc];
-            } else {
-              // All bytes in the run are JUMPDEST opcode bytes (PUSH payload is
-              // skipped in the scan above), so the fallback is a constant.
-              Cost = JumpDestBaseCost;
-            }
-
-            if (UINT64_MAX - Running < Cost) {
-              Running = UINT64_MAX;
-            } else {
-              Running += Cost;
-            }
-            SkipCostByOffset[Pc - RangeStart] = Running;
+        auto jumpDestMeterCostAtPc = [&](size_t Pc) -> uint64_t {
+          if (GasChunkEnd && GasChunkCost && Pc < GasChunkSize &&
+              GasChunkEnd[Pc] > Pc) {
+            const uint64_t ChunkCost =
+                GasChunkCostSPP ? GasChunkCostSPP[Pc] : GasChunkCost[Pc];
+            return ChunkCost > 0 ? ChunkCost : JumpDestBaseCost;
           }
+          if (isInsidePrepaidGasChunk(Pc)) {
+            return 0;
+          }
+          return JumpDestBaseCost;
+        };
+
+        std::vector<uint64_t> ForwardFromOffset(SkipCount + 1, 0);
+        for (size_t Offset = 0; Offset < SkipCount; ++Offset) {
+          uint64_t Total = 0;
+          for (size_t Pc = RangeStart + Offset; Pc < RangeEnd; ++Pc) {
+            const uint64_t Cost = jumpDestMeterCostAtPc(Pc);
+            if (UINT64_MAX - Total < Cost) {
+              Total = UINT64_MAX;
+              break;
+            }
+            Total += Cost;
+          }
+          ForwardFromOffset[Offset] = Total;
         }
 
-        // Cache the total skipped cost at run start so the linear decode path
-        // can reuse it without re-scanning the same consecutive JUMPDEST range.
+        // Cache the linear fallthrough cost for [RangeStart, RangeEnd) so the
+        // decode path can reuse it without re-scanning the same run.
         if (RangeStart < JumpDestRunLastPC.size()) {
           JumpDestRunLastPC[RangeStart] = static_cast<uint32_t>(RangeEnd);
-          JumpDestRunSkipCost[RangeStart] = SkipCostByOffset[0];
+          JumpDestRunSkipCost[RangeStart] = ForwardFromOffset[0];
         }
 
         for (size_t DestPC = RangeStart; DestPC < RangeEnd; ++DestPC) {
@@ -1047,7 +1167,10 @@ void EVMMirBuilder::createJumpTable() {
           JumpDestTable[DestPC] = EntryBB;
 
           setInsertBlock(EntryBB);
-          meterGas(SkipCostByOffset[DestPC - RangeStart]);
+          const uint64_t EntryCost = ForwardFromOffset[DestPC - RangeStart];
+          emitJitOpcodeGasTrace(DestPC, static_cast<uint8_t>(evmc_opcode::OP_JUMPDEST),
+                                EntryCost);
+          meterGas(EntryCost);
           createInstruction<BrInstruction>(true, Ctx, BodyBB);
           addSuccessor(BodyBB);
         }

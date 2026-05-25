@@ -5,6 +5,7 @@
 #include "common/enums.h"
 #include "common/errors.h"
 #include "evm/interpreter.h"
+#include "evm/opcode_gas_trace.h"
 #include "evm/opcode_handlers.h"
 #include "runtime/config.h"
 #include "runtime/evm_instance.h"
@@ -500,6 +501,7 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   MsgWithCode.code_size = Mod->CodeSize;
   if (Msg->depth == 0) {
     TheInst->clearMessageCache();
+    zen::evm::resetOpcodeGasTrace();
   }
   TheInst->setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
   TheInst->pushMessage(&MsgWithCode);
@@ -543,6 +545,9 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
                  static_cast<long long>(TheInst->getGasRefund()),
                  static_cast<long long>(Result.gas_left),
                  static_cast<unsigned long long>(TheInst->getGas()));
+  }
+  if (Msg->depth == 0 && zen::evm::getOpcodeGasTraceConfig().Enabled) {
+    zen::evm::dumpOpcodeGasTraceDiff("interpreter");
   }
   Result.gas_left = TheInst->getGas();
   // Interpreter stores refund on ExeResult; do not clobber with Inst (often 0).
@@ -626,6 +631,7 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
   MsgWithCode.code_size = Mod->CodeSize;
   if (Msg->depth == 0) {
     TheInst->clearMessageCache();
+    zen::evm::resetOpcodeGasTrace();
   }
   TheInst->setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
   TheInst->pushMessage(&MsgWithCode);
@@ -660,6 +666,9 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
                  static_cast<long long>(Result.gas_left),
                  static_cast<unsigned long long>(TheInst->getGas()),
                  static_cast<int>(Result.status_code));
+  }
+  if (Msg->depth == 0 && zen::evm::getOpcodeGasTraceConfig().Enabled) {
+    zen::evm::dumpOpcodeGasTraceDiff("multipass");
   }
   Result.gas_left = TheInst->getGas();
   if (Result.gas_refund == 0) {

@@ -4,11 +4,13 @@
 #include "evm/interpreter.h"
 #include "common/errors.h"
 #include "evm/evm_cache.h"
+#include "evm/opcode_gas_trace.h"
 #include "evm/opcode_handlers.h"
 #include "evmc/instructions.h"
 #include "runtime/evm_instance.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -31,6 +33,8 @@ static ZEN_EVM_INTERP_HELPER bool
 chargeGas(zen::evm::EVMFrame *Frame, zen::evm::InterpreterExecContext &Context,
           const evmc_instruction_metrics *MetricsTable, uint8_t Opcode) {
   const uint64_t GasCost = MetricsTable[Opcode].gas_cost;
+  recordInterpExecGas(static_cast<uint32_t>(Frame->Pc), Opcode, GasCost,
+                      Frame->Msg.depth);
   if ((uint64_t)Frame->Msg.gas < GasCost) {
     Context.setStatus(EVMC_OUT_OF_GAS);
     return false;
@@ -42,6 +46,8 @@ chargeGas(zen::evm::EVMFrame *Frame, zen::evm::InterpreterExecContext &Context,
 static ZEN_EVM_INTERP_HELPER bool
 chargeGas(zen::evm::EVMFrame *Frame, zen::evm::InterpreterExecContext &Context,
           uint64_t GasCost) {
+  recordInterpExecGas(static_cast<uint32_t>(Frame->Pc), 0xfc, GasCost,
+                      Frame->Msg.depth);
   if ((uint64_t)Frame->Msg.gas < GasCost) {
     Context.setStatus(EVMC_OUT_OF_GAS);
     return false;
@@ -403,6 +409,10 @@ void BaseInterpreter::interpret() {
         (uint64_t)Frame->Msg.gas >= GasChunkCost[ChunkStartPc]) {
       const uint32_t ChunkEnd = GasChunkEnd[ChunkStartPc];
       Frame->Msg.gas -= GasChunkCost[ChunkStartPc];
+      if (!getOpcodeGasTraceConfig().Enabled) {
+        recordInterpExecGas(static_cast<uint32_t>(ChunkStartPc), 0xfe,
+                            GasChunkCost[ChunkStartPc], Frame->Msg.depth);
+      }
 #if defined(__GNUC__)
       // =================== COMPUTED GOTO FAST PATH ===================
       // Uses computed goto (GCC/Clang extension) for better branch
@@ -531,6 +541,12 @@ void BaseInterpreter::interpret() {
   do {                                                                         \
     if (INTX_UNLIKELY(Pc >= ChunkEnd))                                         \
       goto cgoto_chunk_done;                                                   \
+    if (getOpcodeGasTraceConfig().Enabled) {                                   \
+      const uint8_t TraceOpcode = static_cast<uint8_t>(Code[Pc]);              \
+      recordInterpExecGas(static_cast<uint32_t>(Pc), TraceOpcode,              \
+                          MetricsTable[TraceOpcode].gas_cost,                  \
+                          Frame->Msg.depth);                                   \
+    }                                                                          \
     goto *cgoto_table[static_cast<uint8_t>(Code[Pc])];                         \
   } while (0)
 

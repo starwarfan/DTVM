@@ -1433,9 +1433,12 @@ void CallHandler::doExecute() {
 
   if (debug_call_gas) {
     std::fprintf(stderr,
-                 "[dtvm-call-gas] rev=%d depth=%d op=0x%02x has_value=%d stipend=%lld "
-                 "parent_gas_before=%llu call_gas_sent=%llu result_gas_left=%lld paid_gas_used=%llu status=%d\n",
+                 "[dtvm-call-gas] rev=%d depth=%d pc=%u op=0x%02x has_value=%d "
+                 "stipend=%lld "
+                 "parent_gas_before=%llu call_gas_sent=%llu result_gas_left=%lld "
+                 "paid_gas_used=%llu status=%d\n",
                  static_cast<int>(Rev), static_cast<int>(Frame->Msg.depth),
+                 static_cast<unsigned>(Frame->Pc),
                  static_cast<unsigned>(OpCode), HasValue ? 1 : 0,
                  static_cast<long long>(CallStipend),
                  static_cast<unsigned long long>(parent_gas_before),

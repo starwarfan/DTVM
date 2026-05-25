@@ -16,6 +16,7 @@
 #include <rapidjson/writer.h>
 
 #include "evm/evm.h"
+#include "evm/opcode_gas_trace.h"
 #include "evm_test_host.hpp"
 #include "runtime/runtime.h"
 #include "utils/evm.h"
@@ -760,6 +761,10 @@ SilkwormGasResult runFixtureViaEvmcVm(
   }
   ConfigureVm(Vm);
 
+  if (getOpcodeGasTraceConfig().Enabled) {
+    resetOpcodeGasTraceAll();
+  }
+
   evmc_message Msg = Fixture.Message;
   const uint64_t ExecutionGas =
       Fixture.GasLimit > Fixture.IntrinsicGas
@@ -785,6 +790,10 @@ SilkwormGasResult runFixtureViaEvmcVm(
   Out.TxGas = Fixture.IntrinsicGas +
               silkwormTxGasFromResult(ExecutionGas, Raw.gas_left, Raw.gas_refund,
                                       Fixture.Revision);
+
+  if (getOpcodeGasTraceConfig().Enabled) {
+    dumpOpcodeGasTraceDiff("fixture-exec");
+  }
 
   if (std::getenv("DTVM_DEBUG_TX_GAS") != nullptr) {
     const uint64_t ExecUsed =

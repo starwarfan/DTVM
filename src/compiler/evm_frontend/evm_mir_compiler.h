@@ -196,6 +196,9 @@ public:
 
   // Complete jump implementation with jump table
   void createJumpTable();
+  void buildInsideGasChunkIndex();
+  bool isInsidePrepaidGasChunk(uint64_t PC) const;
+  void emitJitOpcodeGasTrace(uint64_t PC, uint8_t Opcode, uint64_t Cost);
   void implementConstantJump(uint64_t ConstDest, MBasicBlock *FailureBB);
   void implementIndirectJump(MInstruction *JumpTarget, MBasicBlock *FailureBB);
 
@@ -1011,6 +1014,7 @@ private:
   const uint32_t *GasChunkEnd = nullptr;
   const uint64_t *GasChunkCost = nullptr;
   size_t GasChunkSize = 0;
+  std::vector<uint8_t> InsideGasChunk;
 
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   // Gas register variable - keeps gas value in R14 during execution

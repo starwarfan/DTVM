@@ -308,7 +308,8 @@ public:
             ? ("tx_exec_mod_" + std::to_string(Counter))
             : (Config.ModuleName + "_" + std::to_string(Counter));
 
-    auto ModRet = RT->loadEVMModule(ModuleName, BytecodePtr, BytecodeSize);
+    auto ModRet = RT->loadEVMModule(ModuleName, BytecodePtr, BytecodeSize,
+                                    ActiveRevision);
     if (!ModRet) {
       Result.ErrorMessage = "Failed to load EVM module: " + ModuleName;
       return Result;
@@ -523,7 +524,8 @@ public:
       ;
 
       auto ModRet =
-          RT->loadEVMModule(ModName, ContractCode.data(), ContractCode.size());
+          RT->loadEVMModule(ModName, ContractCode.data(), ContractCode.size(),
+                            Revision);
       if (!ModRet) {
         ZEN_LOG_ERROR("Failed to load EVM module: {}", ModName.c_str());
         return ParentResult;
@@ -741,7 +743,8 @@ public:
         InitcodePtr = &STOP_BYTE;
         InitcodeSize = 1;
       }
-      auto ModRet = RT->loadEVMModule(ModName, InitcodePtr, InitcodeSize);
+      auto ModRet = RT->loadEVMModule(ModName, InitcodePtr, InitcodeSize,
+                                      Revision);
       if (!ModRet) {
         restoreHostState(StateSnapshot);
         ZEN_LOG_ERROR("Failed to load EVM module: {}", ModName.c_str());

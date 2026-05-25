@@ -238,6 +238,10 @@ uint64_t evmHandleCallCode(zen::runtime::EVMInstance *Instance, uint64_t Gas,
                            uint64_t RetOffset, uint64_t RetSize);
 void evmSetReturn(zen::runtime::EVMInstance *Instance, uint64_t MemOffset,
                   uint64_t Length);
+void evmTraceOpcodeGas(zen::runtime::EVMInstance *Instance, uint32_t Pc,
+                       uint32_t Opcode, uint64_t Cost);
+void evmTraceOpcodeGasRange(zen::runtime::EVMInstance *Instance,
+                            uint32_t StartPc, uint32_t EndPcExclusive);
 uint64_t evmHandleDelegateCall(zen::runtime::EVMInstance *Instance,
                                uint64_t Gas, const uint8_t *ToAddr,
                                uint64_t ArgsOffset, uint64_t ArgsSize,
