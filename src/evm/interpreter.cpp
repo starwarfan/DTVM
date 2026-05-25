@@ -402,6 +402,7 @@ void BaseInterpreter::interpret() {
     const size_t ChunkStartPc = static_cast<size_t>(Frame->Pc);
     if (!disable_gas_chunk && ChunkStartPc < CodeSize &&
         GasChunkEnd[ChunkStartPc] > ChunkStartPc &&
+        GasChunkCost[ChunkStartPc] > 0 &&
         (uint64_t)Frame->Msg.gas >= GasChunkCost[ChunkStartPc]) {
       const uint32_t ChunkEnd = GasChunkEnd[ChunkStartPc];
       Frame->Msg.gas -= GasChunkCost[ChunkStartPc];
