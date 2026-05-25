@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <unordered_map>
 #include <utility>
@@ -980,6 +981,14 @@ static bool buildGasChunksSPP(const zen::common::Byte *Code, size_t CodeSize,
     return true;
   }
 
+  // Workaround: contracts with unresolved dynamic JUMP/JUMPI must not use gas
+  // chunk fast path. Pre-charging straight-line blocks then executing CALL via
+  // TARGET_CALLX/doExecute() overpays ~210 gas per recursive CALL (block
+  // 1431916 tx38). Fall back to per-opcode metering until chunk+CALL billing
+  // is aligned with evmone.
+  if (std::getenv("DTVM_DEBUG_DISABLE_GAS_CHUNK") != nullptr) {
+    return true;
+  }
   bool HasDynamicJump = false;
   for (const auto &Block : Blocks) {
     if (!isJumpOpcode(Block.LastOpcode)) {
@@ -992,7 +1001,15 @@ static bool buildGasChunksSPP(const zen::common::Byte *Code, size_t CodeSize,
       break;
     }
   }
-  if (HasDynamicJump) {
+
+  if (!EnableSPP) {
+    if (HasDynamicJump) {
+      return true;
+    }
+    // Interpreter-only fast path: emit unshifted per-block costs and skip
+    // the expensive CFG / call-site / metering pipeline. The JIT consumer
+    // path (which would read GasChunkCostSPP) is never wired up for this
+    // module, so no SPP-shifted values are needed.
     for (const auto &Block : Blocks) {
       if (Block.Start < CodeSize) {
         GasChunkEnd[Block.Start] = Block.End;
@@ -1177,8 +1194,14 @@ static bool buildGasChunksSPP(const zen::common::Byte *Code, size_t CodeSize,
     if (Blocks[Id].Start == Blocks[Id].End) {
       continue;
     }
+    const bool SkipInterpChunk =
+        HasDynamicJump || isGasSensitiveTerminator(Blocks[Id].LastOpcode) ||
+        InCycle[Id] != 0;
     GasChunkEnd[Blocks[Id].Start] = Blocks[Id].End;
-    GasChunkCost[Blocks[Id].Start] = Blocks[Id].Cost;
+    if (!SkipInterpChunk) {
+      GasChunkCost[Blocks[Id].Start] = Blocks[Id].Cost;
+    }
+    GasChunkCostSPP[Blocks[Id].Start] = Metering[Id];
   }
 
   return true;
