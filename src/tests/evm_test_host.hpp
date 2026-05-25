@@ -40,6 +40,7 @@ private:
   using IsolationPtr = std::unique_ptr<Isolation, IsolationDeleter>;
 
   Runtime *RT = nullptr;
+  evmc_vm *NestedEvmcVm = nullptr;
   std::vector<uint8_t> ReturnData;
   static inline std::atomic<uint64_t> ModuleCounter = 0;
   evmc_revision Revision = zen::evm::DEFAULT_REVISION;
@@ -88,6 +89,7 @@ public:
   ZenMockedEVMHost() = default;
 
   void setRuntime(Runtime *NewRT) { RT = NewRT; }
+  void setNestedEvmcVm(evmc_vm *Vm) { NestedEvmcVm = Vm; }
   Runtime *getRuntime() const { return RT; }
 
   void setRevision(evmc_revision Rev) { Revision = Rev; }
@@ -447,12 +449,15 @@ public:
   }
 
   evmc::Result call(const evmc_message &Msg) noexcept override {
-    if (!RT) {
+    if (Msg.kind == EVMC_CREATE || Msg.kind == EVMC_CREATE2) {
+      if (!RT) {
+        return evmc::MockedHost::call(Msg);
+      }
+      return handleCreate(Msg);
+    }
+    if (!RT && !NestedEvmcVm) {
       ZEN_LOG_ERROR("Runtime is not attached to ZenMockedEVMHost");
       return evmc::MockedHost::call(Msg);
-    }
-    if (Msg.kind == EVMC_CREATE || Msg.kind == EVMC_CREATE2) {
-      return handleCreate(Msg);
     }
     evmc::Result ParentResult = evmc::MockedHost::call(Msg);
 
@@ -517,6 +522,35 @@ public:
             evmc::hex(evmc::bytes_view(Msg.recipient.bytes, 20)).c_str());
         return ParentResult;
       }
+
+      if (NestedEvmcVm) {
+        evmc_message CallMsg = Msg;
+        if (!applyCallValueTransfer(CallMsg)) {
+          restoreHostState(StateSnapshot);
+          return ParentResult;
+        }
+        evmc_result Raw = NestedEvmcVm->execute(
+            NestedEvmcVm, &evmc::MockedHost::get_interface(),
+            reinterpret_cast<evmc_host_context *>(this), Revision, &CallMsg,
+            ContractCode.data(), ContractCode.size());
+        if (Raw.output_data && Raw.output_size > 0) {
+          ReturnData.assign(Raw.output_data,
+                            Raw.output_data + Raw.output_size);
+        } else {
+          ReturnData.clear();
+        }
+        if (shouldRevertState(Raw.status_code)) {
+          restoreHostState(StateSnapshot);
+        }
+        evmc::Result ExecResult(
+            Raw.status_code, Raw.gas_left, Raw.gas_refund,
+            ReturnData.empty() ? nullptr : ReturnData.data(), ReturnData.size());
+        if (Raw.release) {
+          Raw.release(&Raw);
+        }
+        return ExecResult;
+      }
+
       uint64_t Counter = ModuleCounter++;
       std::string ModName =
           "evm_model_" + evmc::hex(evmc::bytes_view(Msg.recipient.bytes, 20)) +

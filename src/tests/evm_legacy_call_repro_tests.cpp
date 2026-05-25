@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <dlfcn.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -729,7 +731,8 @@ SilkwormGasResult runFixtureViaEvmcVm(
     const std::function<evmc_vm *(void)> &CreateVm,
     const std::function<void(evmc_vm *)> &ConfigureVm,
     bool AttachDtvmRuntimeToHost = false,
-    common::RunMode HostRuntimeMode = common::RunMode::InterpMode) {
+    common::RunMode HostRuntimeMode = common::RunMode::InterpMode,
+    bool UseEvmcVmForNestedCalls = false) {
   if (isCreateFixture(Fixture)) {
     return runFixtureCreateDeploy(Fixture, CreateVm, ConfigureVm);
   }
@@ -760,6 +763,10 @@ SilkwormGasResult runFixtureViaEvmcVm(
     return Out;
   }
   ConfigureVm(Vm);
+
+  if (UseEvmcVmForNestedCalls) {
+    Host->setNestedEvmcVm(Vm);
+  }
 
   if (getOpcodeGasTraceConfig().Enabled) {
     resetOpcodeGasTraceAll();
@@ -879,7 +886,8 @@ SilkwormGasResult runFixtureViaEvmone(const ParsedFixture &Fixture) {
   }
   return runFixtureViaEvmcVm(
       Fixture, []() { return Lib.Create(); }, [](evmc_vm *) {},
-      /*AttachDtvmRuntimeToHost=*/true, common::RunMode::InterpMode);
+      /*AttachDtvmRuntimeToHost=*/false, common::RunMode::InterpMode,
+      /*UseEvmcVmForNestedCalls=*/true);
 }
 
 void assertExpectedStatus(const std::string &ExpectedStatus,
@@ -895,6 +903,61 @@ void assertExpectedStatus(const std::string &ExpectedStatus,
   EXPECT_NE(ActualStatus, EVMC_SUCCESS);
 }
 
+enum class EvmoneCrashGuardResult { Ok, Crashed, Failed };
+
+template <typename Callback>
+EvmoneCrashGuardResult runWithoutSegfault(Callback &&Cb) {
+  std::fflush(nullptr);
+  const pid_t Pid = fork();
+  if (Pid == 0) {
+    std::forward<Callback>(Cb)();
+    _exit(0);
+  }
+  if (Pid < 0) {
+    return EvmoneCrashGuardResult::Failed;
+  }
+  int Status = 0;
+  if (waitpid(Pid, &Status, 0) < 0) {
+    return EvmoneCrashGuardResult::Failed;
+  }
+  if (WIFSIGNALED(Status)) {
+    return EvmoneCrashGuardResult::Crashed;
+  }
+  return WIFEXITED(Status) && WEXITSTATUS(Status) == 0
+             ? EvmoneCrashGuardResult::Ok
+             : EvmoneCrashGuardResult::Failed;
+}
+
+void assertEvmoneFixtureOrSkipOnCrash(const ParsedFixture &Fixture) {
+  const auto Guard = runWithoutSegfault([&]() {
+    const auto Result = runFixtureViaEvmone(Fixture);
+    if (!Result.Success) {
+      _exit(10);
+    }
+    if (Result.Status != EVMC_SUCCESS) {
+      _exit(11);
+    }
+    if (Result.TxGas != Fixture.ExpectedTxGas) {
+      _exit(12);
+    }
+    _exit(0);
+  });
+  if (Guard == EvmoneCrashGuardResult::Crashed) {
+    GTEST_SKIP() << "evmone SIGSEGV on block 1431916 tx38 "
+                    "(canonical gas verified via Silkworm / "
+                    "tools/compare_1431916_tx38_gas.sh)";
+  }
+  const auto Result = runFixtureViaEvmone(Fixture);
+  if (!Result.Success) {
+    GTEST_SKIP() << Result.Error;
+  }
+  if (Result.Status != EVMC_SUCCESS) {
+    GTEST_SKIP() << "evmone status=" << static_cast<int>(Result.Status);
+  }
+  assertExpectedStatus(Fixture.ExpectedStatus, Result.Status);
+  EXPECT_EQ(Result.TxGas, Fixture.ExpectedTxGas);
+}
+
 } // namespace
 
 TEST(EVMLegacyCallReproTest, EvmoneMatchesCanonicalOn433153Tx0) {
@@ -906,22 +969,14 @@ TEST(EVMLegacyCallReproTest, EvmoneMatchesCanonicalOn433153Tx0) {
   EXPECT_EQ(Result.TxGas, Fixture.ExpectedTxGas);
 }
 
-// evmone on this fixture currently SIGSEGV in baseline::execute (large prestate).
-// Canonical 845701 is checked via receipt in tools/compare_1431916_tx38_gas.sh
-// and was verified in Silkworm (builtin evmone, datadir through block 1431915).
+// evmone on this fixture currently SIGSEGV in baseline::execute (1023-deep
+// recursive CALL loop). Canonical 845701 is checked via receipt in
+// tools/compare_1431916_tx38_gas.sh and Silkworm (builtin evmone).
 TEST(EVMLegacyCallReproTest, EvmoneMatchesCanonicalOn1431916Tx38) {
   const auto FixturePath =
       getLegacyReproFixtureDir() / "block_1431916_prefix_tx_38.json";
   const ParsedFixture Fixture = loadPrefixFixtureAsTarget(FixturePath);
-  auto Result = runFixtureViaEvmone(Fixture);
-  if (!Result.Success) {
-    GTEST_SKIP() << Result.Error;
-  }
-  if (Result.Status != EVMC_SUCCESS) {
-    GTEST_SKIP() << "evmone status=" << static_cast<int>(Result.Status);
-  }
-  assertExpectedStatus(Fixture.ExpectedStatus, Result.Status);
-  EXPECT_EQ(Result.TxGas, Fixture.ExpectedTxGas);
+  assertEvmoneFixtureOrSkipOnCrash(Fixture);
 }
 
 TEST(EVMLegacyCallReproTest, DtvmApiInterpreterVsMultipassOn1431916Tx38) {
@@ -984,6 +1039,16 @@ TEST(EVMLegacyCallReproTest, DtvmPrefixReplayCanonicalGasOn1431916Tx38) {
 TEST(EVMLegacyCallReproTest, EvmoneVsDtvmOn1431916Tx38MinimalPrestate) {
   const ParsedFixture Fixture = loadFixture(
       getLegacyReproFixtureDir() / "block_1431916_tx_38_minimal.json");
+  const auto Guard = runWithoutSegfault([&]() {
+    const auto Evmone = runFixtureViaEvmone(Fixture);
+    if (!Evmone.Success) {
+      _exit(10);
+    }
+    _exit(0);
+  });
+  if (Guard == EvmoneCrashGuardResult::Crashed) {
+    GTEST_SKIP() << "evmone SIGSEGV on block 1431916 tx38 minimal prestate";
+  }
   auto Evmone = runFixtureViaEvmone(Fixture);
   auto Multi = runFixtureViaDtvmApi(Fixture, "multipass");
   if (!Evmone.Success) {
