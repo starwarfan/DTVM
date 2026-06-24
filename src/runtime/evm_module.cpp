@@ -43,13 +43,16 @@ EVMModule::~EVMModule() {
 
 EVMModuleUniquePtr EVMModule::newEVMModule(Runtime &RT,
                                            CodeHolderUniquePtr CodeHolder,
-                                           evmc_revision Rev) {
+                                           evmc_revision Rev,
+                                           EVMMemorySpecializationProfile
+                                               MemoryProfile) {
   void *ObjBuf = RT.allocate(sizeof(EVMModule));
   ZEN_ASSERT(ObjBuf);
 
   auto *RawMod = new (ObjBuf) EVMModule(&RT);
   EVMModuleUniquePtr Mod(RawMod);
   Mod->setRevision(Rev);
+  Mod->setMemorySpecializationProfile(MemoryProfile);
 
   const uint8_t *Data = static_cast<const uint8_t *>(CodeHolder->getData());
   size_t CodeSize = CodeHolder->getSize();

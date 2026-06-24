@@ -66,9 +66,13 @@ void EagerEVMJITCompiler::compile() {
   Ctx.setRevision(EVMMod->getRevision());
   Ctx.setBytecode(reinterpret_cast<const Byte *>(EVMMod->Code),
                   EVMMod->CodeSize);
+  Ctx.setMemoryLinearStrideSkipLeadingZeroLimbStores(
+      EVMMod->getMemorySpecializationProfile().SkipLeadingZeroLimbStores);
   const auto &Cache = EVMMod->getBytecodeCache();
+  const uint64_t *CostSPPPtr =
+      Cache.GasChunkCostSPP.empty() ? nullptr : Cache.GasChunkCostSPP.data();
   Ctx.setGasChunkInfo(Cache.GasChunkEnd.data(), Cache.GasChunkCost.data(),
-                      EVMMod->CodeSize);
+                      CostSPPPtr, EVMMod->CodeSize);
 
   MModule Mod(Ctx);
   buildEVMFunction(Ctx, Mod, *EVMMod);

@@ -12,6 +12,7 @@
 #ifdef ZEN_ENABLE_EVM
 #include "evm/evm.h"
 #include "evmc/evmc.hpp"
+#include "runtime/evm_memory_specialization.h"
 #endif // ZEN_ENABLE_EVM
 #include "runtime/config.h"
 #include "runtime/destroyer.h"
@@ -159,12 +160,14 @@ public:
   /// \warning not thread-safe
   common::MayBe<EVMModule *>
   loadEVMModule(const std::string &Filename,
-                evmc_revision Rev = zen::evm::DEFAULT_REVISION) noexcept;
+                evmc_revision Rev = zen::evm::DEFAULT_REVISION,
+                EVMMemorySpecializationProfile MemoryProfile = {}) noexcept;
 
   /// \warning not thread-safe
   common::MayBe<EVMModule *>
   loadEVMModule(const std::string &ModName, const void *Data, size_t DataSize,
-                evmc_revision Rev = zen::evm::DEFAULT_REVISION) noexcept;
+                evmc_revision Rev = zen::evm::DEFAULT_REVISION,
+                EVMMemorySpecializationProfile MemoryProfile = {}) noexcept;
 #endif // ZEN_ENABLE_EVM
 
   /// \warning not thread-safe
@@ -353,7 +356,8 @@ private:
 
 #ifdef ZEN_ENABLE_EVM
   EVMModule *loadEVMModule(EVMSymbol ModName, CodeHolderUniquePtr CodeHolder,
-                           evmc_revision Rev);
+                           evmc_revision Rev,
+                           EVMMemorySpecializationProfile MemoryProfile = {});
 #endif // ZEN_ENABLE_EVM
 
   void callWasmFunctionInInterpMode(Instance &Inst, uint32_t FuncIdx,

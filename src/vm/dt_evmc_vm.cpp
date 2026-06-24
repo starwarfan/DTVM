@@ -21,6 +21,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #ifdef ZEN_ENABLE_VIRTUAL_STACK
 #include "utils/virtual_stack.h"
@@ -82,22 +83,36 @@ static constexpr size_t MAX_MODULE_CACHE_SIZE = 4096;
 struct CodeAddrRevKey {
   evmc_address Addr;
   evmc_revision Rev;
+  zen::runtime::EVMMemorySpecializationProfile MemoryProfile = {};
 };
 
 struct CodeAddrRevHash {
   size_t operator()(const CodeAddrRevKey &K) const {
+    const auto CodegenKey =
+        getEVMMemorySpecializationCodegenKey(K.MemoryProfile);
     uint64_t H;
     std::memcpy(&H, K.Addr.bytes + 12, sizeof(H));
-    return H ^ (static_cast<size_t>(K.Rev) * 2654435761u);
+    return H ^ (static_cast<size_t>(K.Rev) * 2654435761u) ^
+           (static_cast<size_t>(CodegenKey.SkipLeadingZeroLimbStores) << 20);
   }
 };
 
 struct CodeAddrRevEqual {
   bool operator()(const CodeAddrRevKey &A, const CodeAddrRevKey &B) const {
     return A.Rev == B.Rev &&
+           getEVMMemorySpecializationCodegenKey(A.MemoryProfile)
+                   .SkipLeadingZeroLimbStores ==
+               getEVMMemorySpecializationCodegenKey(B.MemoryProfile)
+                   .SkipLeadingZeroLimbStores &&
            std::memcmp(A.Addr.bytes, B.Addr.bytes, sizeof(A.Addr.bytes)) == 0;
   }
 };
+
+zen::runtime::EVMMemorySpecializationProfile
+deriveMemorySpecializationProfile(const evmc_message *Msg) {
+  return deriveEVMMemorySpecializationProfileFromCallData(
+      Msg ? Msg->input_data : nullptr, Msg ? Msg->input_size : 0);
+}
 
 /// Validate that the cached module's code matches the provided code exactly.
 /// The L1 cache is keyed by (code_address, revision); Ethereum assumes deployed
@@ -323,7 +338,8 @@ zen::common::MayBe<EVMModule *> loadEVMModuleWithRegAllocRetry(
 EVMModule *loadTransientModule(DTVM *VM, const uint8_t *Code, size_t CodeSize,
                                evmc_revision Rev) {
   std::string ModName = "tmp_mod_" + std::to_string(VM->ModCounter++);
-  auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
+  auto ModRet = loadEVMModuleWithRegAllocRetry(
+      VM, ModName, Code, CodeSize, Rev, EVMMemorySpecializationProfile{});
   if (!ModRet)
     return nullptr;
   return *ModRet;
@@ -342,6 +358,8 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   }
 
   IsTransient = false;
+  const EVMMemorySpecializationProfile Profile =
+      deriveMemorySpecializationProfile(Msg);
 
   // L0 disabled: pointer comparison is unsafe when callers reuse addresses
   // for different bytecode (e.g. test frameworks, repeated allocations).
@@ -350,7 +368,7 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   EVMModule *Mod = nullptr;
 
   // L1: Address-based LRU cache lookup
-  CodeAddrRevKey AddrKey{Msg->code_address, Rev};
+  CodeAddrRevKey AddrKey{Msg->code_address, Rev, Profile};
   auto It = VM->AddrCache.find(AddrKey);
   if (It != VM->AddrCache.end() &&
       validateCodeMatch(Code, CodeSize, It->second.first)) {
@@ -387,7 +405,8 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
     }
 
     std::string ModName = "mod_" + std::to_string(VM->ModCounter++);
-    auto ModRet = VM->RT->loadEVMModule(ModName, Code, CodeSize, Rev);
+    auto ModRet = loadEVMModuleWithRegAllocRetry(VM, ModName, Code, CodeSize,
+                                                 Rev, Profile);
     if (!ModRet)
       return nullptr;
     Mod = *ModRet;
@@ -499,8 +518,8 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
   evmc_message MsgWithCode = *Msg;
   MsgWithCode.code = reinterpret_cast<uint8_t *>(Mod->Code);
   MsgWithCode.code_size = Mod->CodeSize;
+  TheInst->clearMessageCache();
   if (Msg->depth == 0) {
-    TheInst->clearMessageCache();
     zen::evm::resetOpcodeGasTrace();
   }
   TheInst->setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
@@ -629,8 +648,8 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
   evmc_message MsgWithCode = *Msg;
   MsgWithCode.code = reinterpret_cast<uint8_t *>(Mod->Code);
   MsgWithCode.code_size = Mod->CodeSize;
+  TheInst->clearMessageCache();
   if (Msg->depth == 0) {
-    TheInst->clearMessageCache();
     zen::evm::resetOpcodeGasTrace();
   }
   TheInst->setExeResult(evmc::Result{EVMC_SUCCESS, 0, 0});
@@ -641,7 +660,7 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
 #ifdef ZEN_ENABLE_VIRTUAL_STACK
   if (Msg->depth == 0) {
     // depth==0: set up virtual stack for stack overflow protection via guard
-    // pages. The virtual stack switches RSP to a separate mmap'd region.
+    // pages. Nested re-entry remains on the same virtual stack.
     zen::utils::VirtualStackInfo StackInfo;
     StackInfo.SavedPtr1 = TheInst;
     StackInfo.SavedPtr2 = &MsgWithCode;
@@ -650,7 +669,6 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
     StackInfo.runInVirtualStack(&callJITFromVirtualStack);
     TheInst->popVirtualStack();
   } else {
-    // depth>0: re-entered via EVMC host callback, already on physical stack
     VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
   }
 #else

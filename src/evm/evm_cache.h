@@ -19,11 +19,15 @@ struct EVMBytecodeCache {
   std::vector<uint8_t> JumpDestMap;
   std::vector<intx::uint256> PushValueMap;
   std::vector<uint32_t> GasChunkEnd;
+  // Per-chunk-start unshifted gas cost. Interpreter reads this.
   std::vector<uint64_t> GasChunkCost;
+  // Per-chunk-start SPP-shifted gas cost for the multipass JIT.
+  std::vector<uint64_t> GasChunkCostSPP;
 };
 
 void buildBytecodeCache(EVMBytecodeCache &Cache, const common::Byte *Code,
-                        size_t CodeSize, evmc_revision Rev);
+                        size_t CodeSize, evmc_revision Rev,
+                        bool EnableSPP = false);
 
 } // namespace zen::evm
 

@@ -66,13 +66,15 @@ public:
   bool isGasMeteringEnabled() const { return GasMeteringEnabled; }
 
   void setGasChunkInfo(const uint32_t *ChunkEnd, const uint64_t *ChunkCost,
-                       size_t Size) {
+                       const uint64_t *ChunkCostSPP, size_t Size) {
     GasChunkEnd = ChunkEnd;
     GasChunkCost = ChunkCost;
+    GasChunkCostSPP = ChunkCostSPP;
     GasChunkSize = Size;
   }
   const uint32_t *getGasChunkEnd() const { return GasChunkEnd; }
   const uint64_t *getGasChunkCost() const { return GasChunkCost; }
+  const uint64_t *getGasChunkCostSPP() const { return GasChunkCostSPP; }
   size_t getGasChunkSize() const { return GasChunkSize; }
   bool hasGasChunks() const {
     return GasChunkEnd && GasChunkCost && GasChunkSize > 0;
@@ -80,6 +82,12 @@ public:
 
   void setRevision(evmc_revision Rev) { Revision = Rev; }
   evmc_revision getRevision() const { return Revision; }
+  void setMemoryLinearStrideSkipLeadingZeroLimbStores(uint8_t Count) {
+    MemoryLinearStrideSkipLeadingZeroLimbStores = Count;
+  }
+  uint8_t getMemoryLinearStrideSkipLeadingZeroLimbStores() const {
+    return MemoryLinearStrideSkipLeadingZeroLimbStores;
+  }
 
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   void setGasRegisterEnabled(bool Enabled) { GasRegisterEnabled = Enabled; }
@@ -92,8 +100,10 @@ private:
   bool GasMeteringEnabled = false;
   const uint32_t *GasChunkEnd = nullptr;
   const uint64_t *GasChunkCost = nullptr;
+  const uint64_t *GasChunkCostSPP = nullptr;
   size_t GasChunkSize = 0;
   evmc_revision Revision = zen::evm::DEFAULT_REVISION;
+  uint8_t MemoryLinearStrideSkipLeadingZeroLimbStores = 0;
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   bool GasRegisterEnabled = false;
 #endif
@@ -822,6 +832,9 @@ private:
   // Template versions of runtime calls
   template <typename RetType>
   Operand callRuntimeFor(RetType (*RuntimeFunc)(runtime::EVMInstance *));
+  template <typename RetType>
+  Operand callRuntimeForWithErrorCheck(
+      RetType (*RuntimeFunc)(runtime::EVMInstance *));
 
   template <typename ArgType>
   U256Inst convertOperandToInstruction(const Operand &Param);
@@ -836,6 +849,11 @@ private:
   Operand callRuntimeFor(RetType (*RuntimeFunc)(runtime::EVMInstance *,
                                                 ArgTypes...),
                          const ParamTypes &...Params);
+  template <typename RetType, typename... ArgTypes, typename... ParamTypes>
+  Operand callRuntimeForWithErrorCheck(
+      RetType (*RuntimeFunc)(runtime::EVMInstance *, ArgTypes...),
+      const ParamTypes &...Params);
+  void emitRuntimeSoftErrorCheck(MInstruction *InstancePtr);
 
   // Helper template functions for runtime call type mapping
   template <typename RetType> MType *getMIRReturnType();
@@ -852,12 +870,23 @@ private:
   // Split normalization for const and non-const U256.
   void normalizeOperandU64Const(Operand &Param, uint64_t *Value = nullptr);
   void normalizeOperandU64NonConst(Operand &Param, uint64_t *Value = nullptr);
+  MInstruction *anchorDirectMemoryPointer(MInstruction *Ptr);
   MInstruction *extractKnownU64LowOperand(const Operand &Opnd);
   void normalizeOffsetWithSize(Operand &Offset, Operand &Size);
 
   Operand convertSingleInstrToU256Operand(MInstruction *SingleInstr);
   Operand convertU256InstrToU256Operand(MInstruction *U256Instr);
   Operand convertBytes32ToU256Operand(const Operand &Bytes32Op);
+  Operand loadU256FromBytes32PointerDisplaced(MInstruction *Bytes32Ptr);
+  Operand loadU256FromBytes32BaseDisplaced(MInstruction *BytesBasePtr,
+                                           uint64_t BaseOffset);
+  void storeU256ToBytes32Pointer(MInstruction *Bytes32Ptr,
+                                 const U256Inst &ValueParts,
+                                 uint64_t SkipLeadingZeroLimbStores = 0);
+  void storeU256ToBytes32BaseDisplaced(MInstruction *BytesBasePtr,
+                                       uint64_t BaseOffset,
+                                       const U256Inst &ValueParts,
+                                       uint64_t SkipLeadingZeroLimbStores = 0);
 
   // Helper functions for operand conversion
   template <size_t N>
@@ -977,9 +1006,11 @@ private:
   struct MemoryBlockConstPrecheckPlan {
     bool Active = false;
     bool Emitted = false;
+    bool HasAnchoredBasePtr = false;
     uint64_t MaxRequiredSize = 0;
     uint64_t CoveredDirectOpsTotal = 0;
     uint64_t CoveredDirectOpsRemaining = 0;
+    Variable *AnchoredBasePtrVar = nullptr;
   };
   struct MemoryBlockLinearPrecheckPlan {
     bool Active = false;
@@ -1002,6 +1033,7 @@ private:
   // Helper methods for memory operations
   MInstruction *getMemoryDataPointer();
   MInstruction *getDirectMemoryDataPointer(bool PreferCachedBase);
+  MInstruction *getConstBlockDirectMemoryBasePtr();
   MInstruction *getMemorySize();
   void reloadMemorySizeFromInstance();
   void expandMemoryIR(MInstruction *RequiredSize, MInstruction *Overflow);
@@ -1013,6 +1045,7 @@ private:
   // Chunk gas metering
   const uint32_t *GasChunkEnd = nullptr;
   const uint64_t *GasChunkCost = nullptr;
+  const uint64_t *GasChunkCostSPP = nullptr;
   size_t GasChunkSize = 0;
   std::vector<uint8_t> InsideGasChunk;
 

@@ -230,8 +230,9 @@ Module *Runtime::loadModule(WASMSymbol Name, CodeHolderUniquePtr CodeHolder,
 }
 
 #ifdef ZEN_ENABLE_EVM
-MayBe<EVMModule *> Runtime::loadEVMModule(const std::string &Filename,
-                                          evmc_revision Rev) noexcept {
+MayBe<EVMModule *>
+Runtime::loadEVMModule(const std::string &Filename, evmc_revision Rev,
+                       EVMMemorySpecializationProfile MemoryProfile) noexcept {
   if (Filename.empty()) {
     return getError(ErrorCode::InvalidFilePath);
   }
@@ -263,7 +264,7 @@ MayBe<EVMModule *> Runtime::loadEVMModule(const std::string &Filename,
     // Create CodeHolder with decoded bytes
     auto Code = CodeHolder::newRawDataCodeHolder(*this, DecodedBytes->data(),
                                                  DecodedBytes->size());
-    return loadEVMModule(Name, std::move(Code), Rev);
+    return loadEVMModule(Name, std::move(Code), Rev, MemoryProfile);
   } catch (const Error &Err) {
     Stats.clearAllTimers();
     freeSymbol(Name);
@@ -275,9 +276,10 @@ MayBe<EVMModule *> Runtime::loadEVMModule(const std::string &Filename,
   }
 }
 
-MayBe<EVMModule *> Runtime::loadEVMModule(const std::string &ModName,
-                                          const void *Data, size_t Size,
-                                          evmc_revision Rev) noexcept {
+MayBe<EVMModule *>
+Runtime::loadEVMModule(const std::string &ModName, const void *Data,
+                       size_t Size, evmc_revision Rev,
+                       EVMMemorySpecializationProfile MemoryProfile) noexcept {
   if (ModName.empty() || (Size != 0 && Data == nullptr)) {
     return getError(ErrorCode::InvalidRawData);
   }
@@ -290,7 +292,7 @@ MayBe<EVMModule *> Runtime::loadEVMModule(const std::string &ModName,
 
   try {
     auto Code = CodeHolder::newRawDataCodeHolder(*this, Data, Size);
-    return loadEVMModule(Name, std::move(Code), Rev);
+    return loadEVMModule(Name, std::move(Code), Rev, MemoryProfile);
   } catch (const Error &Err) {
     Stats.clearAllTimers();
     freeSymbol(Name);
@@ -299,14 +301,15 @@ MayBe<EVMModule *> Runtime::loadEVMModule(const std::string &ModName,
 }
 
 // Before executing this function, it is necessary to ensure that name is unique
-EVMModule *Runtime::loadEVMModule(EVMSymbol Name,
-                                  CodeHolderUniquePtr CodeHolder,
-                                  evmc_revision Rev) {
+EVMModule *
+Runtime::loadEVMModule(EVMSymbol Name, CodeHolderUniquePtr CodeHolder,
+                       evmc_revision Rev,
+                       EVMMemorySpecializationProfile MemoryProfile) {
   ZEN_ASSERT(Name);
   ZEN_ASSERT(CodeHolder);
 
-  EVMModuleUniquePtr Mod =
-      EVMModule::newEVMModule(*this, std::move(CodeHolder), Rev);
+  EVMModuleUniquePtr Mod = EVMModule::newEVMModule(
+      *this, std::move(CodeHolder), Rev, MemoryProfile);
   // All errors in Module::newModule are thrown as exceptions, so the return
   // value must be valid when the following line is executed
   ZEN_ASSERT(Mod);
@@ -823,7 +826,7 @@ void Runtime::callWasmFunctionInJITMode(Instance &Inst, uint32_t FuncIdx,
               static_cast<uint8_t *>(TLS.getTrapState().FaultingAddress);
           auto *VirtualStack = Inst.currentVirtualStack();
           if (FaultingAddress != nullptr && VirtualStack) {
-            if (FaultingAddress >= VirtualStack->AllInfo &&
+            if (FaultingAddress >= VirtualStack->AllocatedMem &&
                 FaultingAddress < VirtualStack->StackMemoryTop) {
               CapturedTapErrCode = ErrorCode::CallStackExhausted;
             }
@@ -950,7 +953,7 @@ void Runtime::callEVMInJITMode(EVMInstance &Inst, evmc_message &Msg,
               static_cast<uint8_t *>(TLS.getTrapState().FaultingAddress);
           auto *VirtualStack = Inst.currentVirtualStack();
           if (FaultingAddress != nullptr && VirtualStack) {
-            if (FaultingAddress >= VirtualStack->AllInfo &&
+            if (FaultingAddress >= VirtualStack->AllocatedMem &&
                 FaultingAddress < VirtualStack->StackMemoryTop) {
               CapturedTapErrCode = ErrorCode::CallStackExhausted;
               StatusCode = EVMC_STACK_OVERFLOW;

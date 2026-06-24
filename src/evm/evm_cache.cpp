@@ -972,7 +972,9 @@ static bool buildGasChunksSPP(const zen::common::Byte *Code, size_t CodeSize,
                               const std::vector<uint8_t> &JumpDestMap,
                               const std::vector<intx::uint256> &PushValueMap,
                               std::vector<uint32_t> &GasChunkEnd,
-                              std::vector<uint64_t> &GasChunkCost) {
+                              std::vector<uint64_t> &GasChunkCost,
+                              std::vector<uint64_t> &GasChunkCostSPP,
+                              bool EnableSPP) {
   std::vector<GasBlock> Blocks;
   std::vector<uint32_t> BlockAtPc;
   buildGasBlocks(Code, CodeSize, MetricsTable, Blocks, BlockAtPc);
@@ -1226,11 +1228,16 @@ static bool buildGasChunksSPP(const zen::common::Byte *Code, size_t CodeSize,
 } // namespace
 
 void buildBytecodeCache(EVMBytecodeCache &Cache, const common::Byte *Code,
-                        size_t CodeSize, evmc_revision Rev) {
+                        size_t CodeSize, evmc_revision Rev, bool EnableSPP) {
   Cache.JumpDestMap.assign(CodeSize, 0);
   Cache.PushValueMap.resize(CodeSize);
   Cache.GasChunkEnd.assign(CodeSize, 0);
   Cache.GasChunkCost.assign(CodeSize, 0);
+  if (EnableSPP) {
+    Cache.GasChunkCostSPP.assign(CodeSize, 0);
+  } else {
+    Cache.GasChunkCostSPP.clear();
+  }
 
   buildJumpDestMapAndPushCache(Code, CodeSize, Cache.JumpDestMap,
                                Cache.PushValueMap);
@@ -1240,7 +1247,8 @@ void buildBytecodeCache(EVMBytecodeCache &Cache, const common::Byte *Code,
   }
 
   buildGasChunksSPP(Code, CodeSize, MetricsTable, Cache.JumpDestMap,
-                    Cache.PushValueMap, Cache.GasChunkEnd, Cache.GasChunkCost);
+                    Cache.PushValueMap, Cache.GasChunkEnd, Cache.GasChunkCost,
+                    Cache.GasChunkCostSPP, EnableSPP);
 }
 
 } // namespace zen::evm
